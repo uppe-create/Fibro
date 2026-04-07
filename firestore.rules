@@ -1,0 +1,56 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        ((request.auth.token.email == "luizcupperi.ipero@gmail.com" && request.auth.token.email_verified == true) ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+    }
+
+    function isAttendantOrAdmin() {
+      return isAuthenticated() && 
+        ((request.auth.token.email == "luizcupperi.ipero@gmail.com" && request.auth.token.email_verified == true) ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'attendant']));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /registrations/{regId} {
+      // Public can read a specific registration for validation purposes
+      allow get: if true;
+      // Only authenticated users (attendants/admins) can list all registrations
+      allow list: if isAttendantOrAdmin();
+      
+      // Attendants and Admins can create registrations
+      allow create: if isAttendantOrAdmin();
+      
+      // Only Admins can update or delete registrations
+      allow update, delete: if isAdmin();
+    }
+
+    match /audit_logs/{logId} {
+      // Only admins can read audit logs
+      allow read: if isAdmin();
+      // Attendants and Admins can create audit logs
+      allow create: if isAttendantOrAdmin();
+      allow update, delete: if false;
+    }
+  }
+}
