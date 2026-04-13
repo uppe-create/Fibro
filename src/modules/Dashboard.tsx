@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useAppStore, CIPFRegistration } from '@/store/useAppStore';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, AlertTriangle, Eye, ShieldAlert, FileText, Trash2, Users, Clock, CheckCircle, RefreshCw, Loader2, Download } from 'lucide-react';
+import { Search, AlertTriangle, Eye, ShieldAlert, FileText, Trash2, Users, Clock, CheckCircle, RefreshCw, Loader2, Download, FileBadge2, X } from 'lucide-react';
 import { db } from '../firebase';
-import { collection, query, where, getDocs, deleteDoc, doc, addDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, deleteDoc, doc, addDoc, getDoc } from 'firebase/firestore';
+import { CarteirinhaPreview } from '@/components/CarteirinhaPreview';
 
 export function Dashboard() {
   const { registrations, currentUser, fetchRegistrations } = useAppStore();
@@ -13,13 +14,59 @@ export function Dashboard() {
   const [viewLogs, setViewLogs] = useState<{ fullName: string, logs: any[] } | null>(null);
   const [regToDelete, setRegToDelete] = useState<CIPFRegistration | null>(null);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
+  const [showClearDbModal, setShowClearDbModal] = useState(false);
+  const [clearDbConfirmation, setClearDbConfirmation] = useState('');
+  const [isClearingDb, setIsClearingDb] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [previewReg, setPreviewReg] = useState<CIPFRegistration | null>(null);
+  const [previewPhotoUri, setPreviewPhotoUri] = useState<string>('');
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
   const [filter, setFilter] = useState<'all' | 'expiring30'>('all');
 
   React.useEffect(() => {
     loadData();
   }, []);
+
+  const handlePreviewCarteirinha = async (reg: CIPFRegistration) => {
+    setPreviewReg(reg);
+    setIsPreviewLoading(true);
+    setPreviewPhotoUri('');
+    
+    if (reg.photoFileId) {
+      try {
+        const docRef = doc(db, 'cipf_files', reg.photoFileId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const fileData = docSnap.data();
+          if (fileData.data) {
+            setPreviewPhotoUri(fileData.data);
+          } else if (fileData.totalChunks) {
+            const chunkPromises = [];
+            for (let i = 0; i < fileData.totalChunks; i++) {
+              chunkPromises.push(getDoc(doc(db, 'cipf_files', reg.photoFileId, 'chunks', i.toString())));
+            }
+            const chunkSnaps = await Promise.all(chunkPromises);
+            let fullData = '';
+            chunkSnaps.forEach(snap => {
+              if (snap.exists()) {
+                fullData += snap.data().data;
+              }
+            });
+            setPreviewPhotoUri(fullData);
+          }
+        } else {
+          setPreviewPhotoUri(reg.photoUrl || '');
+        }
+      } catch (e) {
+        console.error("Error fetching photo", e);
+        setPreviewPhotoUri(reg.photoUrl || '');
+      }
+    } else {
+      setPreviewPhotoUri(reg.photoUrl || '');
+    }
+    setIsPreviewLoading(false);
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -76,22 +123,83 @@ export function Dashboard() {
   }, {} as Record<string, number>);
 
   const handleViewMedicalDoc = async (reg: CIPFRegistration) => {
-    if (reg.medicalReportUrl) {
-      window.open(reg.medicalReportUrl, '_blank');
-      
-      // Log access
-      if (currentUser) {
-        await addDoc(collection(db, 'audit_logs'), {
-          registrationId: reg.id,
-          userId: currentUser.id,
-          userName: currentUser.name,
-          ip: 'client',
-          timestamp: new Date().toISOString(),
-          action: 'Visualização de Laudo Médico'
-        });
-      }
-    } else {
+    // Check for either the new ID-based system or the old URL-based system
+    const fileId = (reg as any).medicalReportFileId;
+    const fileUrl = reg.medicalReportUrl;
+
+    if (!fileId && !fileUrl) {
       alert('Documento não encontrado.');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      let dataUri = fileUrl;
+
+      if (fileId) {
+        const docRef = doc(db, 'cipf_files', fileId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const fileData = docSnap.data();
+          if (fileData.data) {
+            dataUri = fileData.data; // Legacy format
+          } else if (fileData.totalChunks) {
+            const chunkPromises = [];
+            for (let i = 0; i < fileData.totalChunks; i++) {
+              chunkPromises.push(getDoc(doc(db, 'cipf_files', fileId, 'chunks', i.toString())));
+            }
+            const chunkSnaps = await Promise.all(chunkPromises);
+            let fullData = '';
+            chunkSnaps.forEach(snap => {
+              if (snap.exists()) {
+                fullData += snap.data().data;
+              }
+            });
+            dataUri = fullData;
+          }
+        } else {
+          throw new Error('Arquivo não encontrado no banco de dados.');
+        }
+      }
+
+      if (dataUri) {
+        if (dataUri.startsWith('data:')) {
+          // Convert Base64 Data URI to Blob to bypass browser restrictions on opening data URIs directly
+          const arr = dataUri.split(',');
+          const mimeMatch = arr[0].match(/:(.*?);/);
+          const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
+          const bstr = atob(arr[1]);
+          let n = bstr.length;
+          const u8arr = new Uint8Array(n);
+          while (n--) {
+            u8arr[n] = bstr.charCodeAt(n);
+          }
+          const blob = new Blob([u8arr], { type: mime });
+          const blobUrl = URL.createObjectURL(blob);
+          
+          window.open(blobUrl, '_blank');
+        } else {
+          // It's a regular URL (e.g., Firebase Storage)
+          window.open(dataUri, '_blank');
+        }
+
+        // Log access
+        if (currentUser) {
+          await addDoc(collection(db, 'audit_logs'), {
+            registrationId: reg.id,
+            userId: currentUser.id,
+            userName: currentUser.name,
+            ip: 'client',
+            timestamp: new Date().toISOString(),
+            action: 'Visualização de Laudo Médico'
+          });
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Erro ao abrir o documento.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -122,8 +230,20 @@ export function Dashboard() {
   };
 
   const confirmDelete = async () => {
-    if (!regToDelete || deleteConfirmationText !== regToDelete.fullName) return;
+    if (!regToDelete || deleteConfirmationText.trim().toUpperCase() !== regToDelete.fullName.trim().toUpperCase()) return;
     try {
+      if (currentUser) {
+        await addDoc(collection(db, 'audit_logs'), {
+          registrationId: regToDelete.id,
+          userId: currentUser.id,
+          userName: currentUser.name,
+          ip: 'client',
+          timestamp: new Date().toISOString(),
+          action: 'Exclusão de Registro',
+          reason: `Registro de ${regToDelete.fullName} excluído pelo administrador.`
+        });
+      }
+
       await deleteDoc(doc(db, 'registrations', regToDelete.id));
       setRegToDelete(null);
       setDeleteConfirmationText('');
@@ -136,24 +256,27 @@ export function Dashboard() {
 
   const handleExport = async () => {
     try {
-      const querySnapshot = await getDocs(collection(db, 'registrations'));
-      const exportedData: any[] = [];
-      querySnapshot.forEach((doc) => {
-        exportedData.push({ id: doc.id, ...doc.data() });
-      });
-
-      const blob = new Blob([JSON.stringify(exportedData, null, 2)], { type: 'application/json' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'cipf_export.json';
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      await useAppStore.getState().exportDatabase();
     } catch (error) {
       console.error(error);
       alert('Erro ao exportar dados.');
+    }
+  };
+
+  const handleClearDatabase = async () => {
+    if (clearDbConfirmation !== 'EXCLUIR TUDO') return;
+    
+    try {
+      setIsClearingDb(true);
+      await useAppStore.getState().clearDatabase();
+      setShowClearDbModal(false);
+      setClearDbConfirmation('');
+      alert('Banco de dados limpo com sucesso.');
+      loadData();
+    } catch (error: any) {
+      alert(error.message || 'Erro ao limpar banco de dados.');
+    } finally {
+      setIsClearingDb(false);
     }
   };
 
@@ -166,14 +289,24 @@ export function Dashboard() {
         </div>
         <div className="flex gap-3">
           {currentUser?.role === 'admin' && (
-            <Button 
-              variant="outline" 
-              onClick={handleExport} 
-              className="rounded-xl h-11 px-4 border-gray-200 text-[#1D1D1F] hover:bg-gray-50 transition-all"
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Exportar Base
-            </Button>
+            <>
+              <Button 
+                variant="outline" 
+                onClick={() => setShowClearDbModal(true)} 
+                className="rounded-xl h-11 px-4 border-red-100 text-red-600 hover:bg-red-50 hover:border-red-200 transition-all"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Limpar Banco
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={handleExport} 
+                className="rounded-xl h-11 px-4 border-gray-200 text-[#1D1D1F] hover:bg-gray-50 transition-all"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Exportar Base
+              </Button>
+            </>
           )}
           <Button 
             variant="outline" 
@@ -322,6 +455,9 @@ export function Dashboard() {
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50" onClick={() => handlePreviewCarteirinha(reg)} title="Pré-visualizar Carteirinha">
+                          <FileBadge2 className="h-4 w-4" />
+                        </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => handleViewMedicalDoc(reg)} title="Ver Laudo Médico">
                           <FileText className="h-4 w-4" />
                         </Button>
@@ -408,10 +544,113 @@ export function Dashboard() {
               </Button>
               <Button 
                 onClick={confirmDelete} 
-                disabled={deleteConfirmationText !== regToDelete.fullName}
+                disabled={deleteConfirmationText.trim().toUpperCase() !== regToDelete.fullName.trim().toUpperCase()}
                 className="rounded-xl h-11 px-5 bg-red-600 hover:bg-red-700 text-white font-medium shadow-sm transition-all disabled:opacity-50 disabled:hover:bg-red-600"
               >
                 Excluir Registro
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Limpeza do Banco */}
+      {showClearDbModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden animate-in zoom-in-95 duration-200 p-6 md:p-8">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="p-3 bg-red-100 text-red-600 rounded-2xl">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-semibold text-[#1D1D1F]">Limpar Banco de Dados</h3>
+            </div>
+            <div className="bg-red-50 border border-red-100 rounded-2xl p-4 mb-6">
+              <p className="text-red-800 text-sm font-medium leading-relaxed">
+                ATENÇÃO: Esta ação é irreversível. Todos os cadastros e logs de auditoria serão excluídos permanentemente.
+              </p>
+            </div>
+            <p className="text-[#86868B] text-sm mb-4">
+              Para confirmar a exclusão total, digite <strong className="text-red-600">EXCLUIR TUDO</strong> abaixo:
+            </p>
+            <Input
+              value={clearDbConfirmation}
+              onChange={(e) => setClearDbConfirmation(e.target.value)}
+              placeholder="EXCLUIR TUDO"
+              className="mb-8 rounded-xl bg-gray-50 border-gray-200 focus:bg-white transition-colors h-12 font-bold text-center"
+            />
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button 
+                variant="ghost" 
+                onClick={() => {
+                  setShowClearDbModal(false);
+                  setClearDbConfirmation('');
+                }} 
+                className="flex-1 rounded-xl h-12 text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 font-medium"
+                disabled={isClearingDb}
+              >
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleClearDatabase} 
+                disabled={clearDbConfirmation !== 'EXCLUIR TUDO' || isClearingDb}
+                className="flex-1 rounded-xl h-12 bg-red-600 hover:bg-red-700 text-white font-medium shadow-sm transition-all disabled:opacity-50"
+              >
+                {isClearingDb ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Limpando...
+                  </>
+                ) : (
+                  'Confirmar Exclusão Total'
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Pré-visualização da Carteirinha */}
+      {previewReg && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200 overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden animate-in zoom-in-95 duration-200 max-w-4xl w-full my-8">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                  <FileBadge2 className="w-5 h-5" />
+                </div>
+                <h3 className="text-xl font-semibold text-[#1D1D1F]">Pré-visualização da Carteirinha</h3>
+              </div>
+              <Button variant="ghost" size="icon" onClick={() => setPreviewReg(null)} className="rounded-full hover:bg-gray-100">
+                <X className="w-5 h-5 text-gray-500" />
+              </Button>
+            </div>
+            
+            <div className="p-6 bg-gray-50/50 flex justify-center min-h-[400px]">
+              {isPreviewLoading ? (
+                <div className="flex flex-col items-center justify-center text-[#86868B]">
+                  <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-4" />
+                  <p className="font-medium">Carregando foto e dados...</p>
+                </div>
+              ) : (
+                <div className="scale-[0.85] sm:scale-100 origin-top">
+                  <CarteirinhaPreview registration={previewReg} photoDataUri={previewPhotoUri} />
+                </div>
+              )}
+            </div>
+            
+            <div className="p-6 border-t border-gray-100 flex justify-end gap-3 bg-white">
+              <Button variant="ghost" onClick={() => setPreviewReg(null)} className="rounded-xl h-11 px-5 text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 font-medium">
+                Fechar
+              </Button>
+              <Button 
+                onClick={() => {
+                  setPreviewReg(null);
+                  window.history.pushState({}, '', `/carteirinha?search=${previewReg.cpf}`);
+                  useAppStore.getState().setActiveTab('carteirinha');
+                }} 
+                className="rounded-xl h-11 px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-sm transition-all"
+              >
+                Ir para Impressão
               </Button>
             </div>
           </div>

@@ -10,21 +10,47 @@
         "phone": { "type": "string", "description": "Phone number" },
         "birthDate": { "type": "string", "description": "Birth date in DD/MM/AAAA format" },
         "legalGuardian": { "type": "string", "description": "Legal guardian name, if applicable" },
-        "documentUrl": { "type": "string", "description": "URL or path to the official document" },
-        "proofOfResidenceUrl": { "type": "string", "description": "URL or path to the proof of residence" },
+        "documentUrl": { "type": "string", "description": "URL or path to the official document (legacy)" },
+        "proofOfResidenceUrl": { "type": "string", "description": "URL or path to the proof of residence (legacy)" },
         "proofOfResidenceDate": { "type": "string", "description": "Date of the proof of residence" },
-        "medicalReportUrl": { "type": "string", "description": "URL or path to the medical report" },
+        "medicalReportUrl": { "type": "string", "description": "URL or path to the medical report (legacy)" },
         "medicalReportDate": { "type": "string", "description": "Date of the medical report" },
         "cid": { "type": "string", "description": "CID code (must be M79.7)" },
         "crm": { "type": "string", "description": "Doctor's CRM" },
-        "photoUrl": { "type": "string", "description": "URL or path to the beneficiary's photo" },
+        "photoUrl": { "type": "string", "description": "URL or path to the beneficiary's photo (legacy)" },
+        "documentFileId": { "type": "string", "description": "ID of the official document in cipf_files" },
+        "proofOfResidenceFileId": { "type": "string", "description": "ID of the proof of residence in cipf_files" },
+        "medicalReportFileId": { "type": "string", "description": "ID of the medical report in cipf_files" },
+        "photoFileId": { "type": "string", "description": "ID of the beneficiary's photo in cipf_files" },
         "issueDate": { "type": "string", "description": "Date of issue" },
         "expiryDate": { "type": "string", "description": "Date of expiry" },
         "status": { "type": "string", "enum": ["active", "expired", "pending"], "description": "Status of the registration" },
         "visualSignature": { "type": "string", "description": "Visual signature code" },
         "userId": { "type": "string", "description": "ID of the user who created the registration" }
       },
-      "required": ["fullName", "cpf", "phone", "birthDate", "documentUrl", "proofOfResidenceUrl", "proofOfResidenceDate", "medicalReportUrl", "medicalReportDate", "cid", "crm", "photoUrl", "issueDate", "expiryDate", "status", "visualSignature", "userId"]
+      "required": ["fullName", "cpf", "phone", "birthDate", "proofOfResidenceDate", "medicalReportDate", "cid", "crm", "issueDate", "expiryDate", "status", "visualSignature", "userId"]
+    },
+    "CipfFile": {
+      "title": "CipfFile",
+      "description": "Base64 encoded file data",
+      "type": "object",
+      "properties": {
+        "data": { "type": "string", "description": "Base64 encoded file data" },
+        "type": { "type": "string", "description": "Type of the file (e.g., photo, document)" },
+        "name": { "type": "string", "description": "Original file name" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the file was created" }
+      },
+      "required": ["type", "name", "createdAt"]
+    },
+    "CipfFileChunk": {
+      "title": "CipfFileChunk",
+      "description": "A chunk of a Base64 encoded file",
+      "type": "object",
+      "properties": {
+        "index": { "type": "number", "description": "Index of the chunk" },
+        "data": { "type": "string", "description": "Base64 encoded chunk data" }
+      },
+      "required": ["index", "data"]
     },
     "AuditLog": {
       "title": "AuditLog",
@@ -64,6 +90,14 @@
     "users": {
       "schema": { "$ref": "#/entities/User" },
       "description": "Collection of users and their roles"
+    },
+    "cipf_files": {
+      "schema": { "$ref": "#/entities/CipfFile" },
+      "description": "Collection of base64 encoded files"
+    },
+    "cipf_files/{fileId}/chunks": {
+      "schema": { "$ref": "#/entities/CipfFileChunk" },
+      "description": "Subcollection of file chunks"
     }
   }
 }

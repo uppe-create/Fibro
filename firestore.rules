@@ -50,7 +50,23 @@ service cloud.firestore {
       allow read: if isAdmin();
       // Attendants and Admins can create audit logs
       allow create: if isAttendantOrAdmin();
-      allow update, delete: if false;
+      // Only admins can delete logs (for database reset)
+      allow delete: if isAdmin();
+      allow update: if false;
+    }
+
+    match /cipf_files/{fileId} {
+      allow read: if isAttendantOrAdmin();
+      allow create: if isAttendantOrAdmin();
+      allow delete: if isAdmin();
+      allow update: if false;
+
+      match /chunks/{chunkId} {
+        allow read: if isAttendantOrAdmin();
+        allow create: if isAttendantOrAdmin();
+        allow delete: if isAdmin();
+        allow update: if false;
+      }
     }
   }
 }

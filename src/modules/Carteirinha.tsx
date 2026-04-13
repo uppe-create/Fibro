@@ -1,16 +1,19 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store/useAppStore';
-import { Search, Printer, FileBadge2, Loader2, Download } from 'lucide-react';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import { Search, Printer, FileBadge2, Loader2, Download, Image as ImageIcon } from 'lucide-react';
+import * as htmlToImage from 'html-to-image';
+import { db } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { CarteirinhaPreview } from '@/components/CarteirinhaPreview';
 
 export function Carteirinha() {
   const { registrations, fetchRegistrations } = useAppStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedReg, setSelectedReg] = useState<any>(null);
+  const [photoDataUri, setPhotoDataUri] = useState<string>('');
+  const [isImageLoaded, setIsImageLoaded] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
@@ -20,28 +23,95 @@ export function Carteirinha() {
       setIsLoading(true);
       await fetchRegistrations();
       setIsLoading(false);
+      
+      // Auto-search if URL parameter is present
+      const urlParams = new URLSearchParams(window.location.search);
+      const searchParam = urlParams.get('search');
+      if (searchParam) {
+        setSearchTerm(searchParam);
+        // We need to wait a tick for state to update, or just call handleSearch directly with the param
+        // But handleSearch uses the searchTerm state. Let's modify handleSearch to accept an optional param.
+      }
     };
 
     if (registrations.length === 0) {
       loadData();
+    } else {
+      const urlParams = new URLSearchParams(window.location.search);
+      const searchParam = urlParams.get('search');
+      if (searchParam) {
+        setSearchTerm(searchParam);
+      }
     }
   }, []);
 
-  const handleSearch = () => {
-    if (!searchTerm.trim()) {
+  // Trigger search when searchTerm is set from URL initially
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const searchParam = urlParams.get('search');
+    if (searchParam && searchTerm === searchParam && registrations.length > 0) {
+      handleSearch(searchParam);
+      // Remove param from URL so it doesn't trigger again on refresh
+      window.history.replaceState({}, '', '/carteirinha');
+    }
+  }, [searchTerm, registrations]);
+
+  const handleSearch = async (termToSearch?: string) => {
+    const term = typeof termToSearch === 'string' ? termToSearch : searchTerm;
+    
+    if (!term.trim()) {
       setSelectedReg(null);
+      setPhotoDataUri('');
+      setIsImageLoaded(false);
       return;
     }
     
     const found = registrations.find(r => 
-      r.cpf.includes(searchTerm) || r.fullName.toLowerCase().includes(searchTerm.toLowerCase())
+      r.cpf.includes(term) || r.fullName.toLowerCase().includes(term.toLowerCase())
     );
+    
+    setIsImageLoaded(false);
     
     if (found) {
       setSelectedReg(found);
+      
+      // Fetch photo if using the new ID-based system
+      if (found.photoFileId) {
+        try {
+          const docRef = doc(db, 'cipf_files', found.photoFileId);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const fileData = docSnap.data();
+            if (fileData.data) {
+              setPhotoDataUri(fileData.data);
+            } else if (fileData.totalChunks) {
+              const chunkPromises = [];
+              for (let i = 0; i < fileData.totalChunks; i++) {
+                chunkPromises.push(getDoc(doc(db, 'cipf_files', found.photoFileId, 'chunks', i.toString())));
+              }
+              const chunkSnaps = await Promise.all(chunkPromises);
+              let fullData = '';
+              chunkSnaps.forEach(snap => {
+                if (snap.exists()) {
+                  fullData += snap.data().data;
+                }
+              });
+              setPhotoDataUri(fullData);
+            }
+          } else {
+            setPhotoDataUri(found.photoUrl || '');
+          }
+        } catch (e) {
+          console.error("Error fetching photo", e);
+          setPhotoDataUri(found.photoUrl || '');
+        }
+      } else {
+        setPhotoDataUri(found.photoUrl || '');
+      }
     } else {
       alert('Nenhum cadastro encontrado com este nome ou CPF.');
       setSelectedReg(null);
+      setPhotoDataUri('');
     }
   };
 
@@ -51,51 +121,23 @@ export function Carteirinha() {
     try {
       setIsPrinting(true);
       
-      // Capture the element as a canvas
-      const canvas = await html2canvas(printRef.current, {
-        scale: 3, // Higher scale for better print quality
-        useCORS: true, // Allow loading images from Firebase Storage
+      // Capture the element as a PNG using html-to-image
+      const dataUrl = await htmlToImage.toPng(printRef.current, {
+        quality: 1.0,
+        pixelRatio: 3, // Higher scale for better print quality
         backgroundColor: '#ffffff',
-        logging: false
       });
       
-      const imgData = canvas.toDataURL('image/png');
-      
-      // Create PDF (A4 size)
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-      
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      
-      // Calculate dimensions to fit the cards nicely on the page
-      const imgProps = pdf.getImageProperties(imgData);
-      const margin = 20; // 20mm margin
-      const availableWidth = pdfWidth - (margin * 2);
-      
-      const ratio = imgProps.width / imgProps.height;
-      const renderWidth = availableWidth;
-      const renderHeight = renderWidth / ratio;
-      
-      // Add title and instructions to the PDF
-      pdf.setFontSize(16);
-      pdf.text('Carteira de Identificação da Pessoa com Fibromialgia', pdfWidth / 2, 20, { align: 'center' });
-      
-      pdf.setFontSize(10);
-      pdf.setTextColor(100);
-      pdf.text('Recorte nas linhas indicadas e dobre ao meio para plastificar.', pdfWidth / 2, 28, { align: 'center' });
-      
-      // Add the captured image
-      pdf.addImage(imgData, 'PNG', margin, 40, renderWidth, renderHeight);
-      
-      // Save the PDF
-      pdf.save(`CIPF_${selectedReg.cpf.replace(/\D/g, '')}.pdf`);
+      // Create a download link for the image
+      const link = document.createElement('a');
+      link.download = `CIPF_${selectedReg.cpf.replace(/\D/g, '')}.png`;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       
     } catch (error) {
-      console.error('Erro ao gerar PDF:', error);
+      console.error('Erro ao gerar imagem:', error);
       alert('Ocorreu um erro ao gerar o arquivo para impressão. Tente novamente.');
     } finally {
       setIsPrinting(false);
@@ -110,48 +152,53 @@ export function Carteirinha() {
   // Helper to get a valid, publicly accessible URL for the QR Code
   const getBaseUrl = () => {
     try {
-      let url = window.location.origin;
+      const origin = window.location.origin;
       
       // If running in a sandboxed iframe where origin is null
-      if (!url || url === 'null') {
-        url = 'https://ais-pre-geuns4xwjglsjownoqyjdq-511970797741.us-east1.run.app';
+      if (!origin || origin === 'null') {
+        return 'https://ais-pre-geuns4xwjglsjownoqyjdq-511970797741.us-east1.run.app';
       }
       
       // Convert AI Studio private dev URL to public shared URL so phones can access it
-      if (url.includes('ais-dev-')) {
-        url = url.replace('ais-dev-', 'ais-pre-');
+      if (origin.includes('ais-dev-')) {
+        return origin.replace('ais-dev-', 'ais-pre-');
       }
       
-      return url;
+      return origin;
     } catch (e) {
       return 'https://ais-pre-geuns4xwjglsjownoqyjdq-511970797741.us-east1.run.app';
     }
   };
 
+  const validationUrl = selectedReg ? `${getBaseUrl()}/valida?id=${selectedReg.id}&sig=${selectedReg.visualSignature || ''}` : '';
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/20 overflow-hidden print:hidden">
-        <div className="p-6 md:p-8 border-b border-gray-100/50">
-          <h2 className="text-2xl font-semibold text-[#1D1D1F] tracking-tight">Gerar Carteirinha</h2>
+        <div className="p-8 text-center border-b border-gray-100/50">
+          <div className="w-16 h-16 bg-blue-600/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <FileBadge2 className="w-8 h-8 text-blue-600" />
+          </div>
+          <h2 className="text-2xl font-semibold text-[#1D1D1F] tracking-tight">Consulta de Carteirinha</h2>
           <p className="text-[#86868B] mt-1">Busque por um cadastro ativo para visualizar e imprimir a CIPF.</p>
         </div>
-        <div className="p-6 md:p-8">
-          <div className="flex flex-col sm:flex-row gap-3 max-w-xl">
+        <div className="p-8 bg-gray-50/30">
+          <div className="flex flex-col sm:flex-row gap-3 max-w-2xl mx-auto">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#86868B]" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-[#86868B]" />
               <Input 
-                placeholder="Buscar por Nome ou CPF..." 
+                placeholder="Digite o Nome completo ou CPF do titular..." 
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                className="pl-9 bg-gray-50/50 border-gray-200 focus:bg-white transition-colors rounded-xl h-12"
+                className="pl-12 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-all rounded-2xl h-14 text-base shadow-sm"
                 disabled={isLoading}
               />
             </div>
             <Button 
               onClick={handleSearch} 
-              disabled={isLoading}
-              className="rounded-xl h-12 px-6 bg-gray-900 hover:bg-gray-800 text-white font-medium shadow-sm transition-all active:scale-[0.98]"
+              disabled={isLoading || !searchTerm.trim()}
+              className="rounded-2xl h-14 px-8 bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-all active:scale-[0.98]"
             >
               Buscar
             </Button>
@@ -169,18 +216,18 @@ export function Carteirinha() {
           <div className="flex justify-end print:hidden">
             <Button 
               onClick={handlePrint} 
-              disabled={isPrinting}
-              className="rounded-xl h-10 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-all active:scale-[0.98]"
+              disabled={isPrinting || (!!photoDataUri && !isImageLoaded)}
+              className="rounded-xl h-10 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-all active:scale-[0.98] disabled:opacity-50"
             >
               {isPrinting ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Gerando PDF...
+                  Gerando Imagem...
                 </>
               ) : (
                 <>
-                  <Download className="h-4 w-4 mr-2" />
-                  Baixar PDF para Impressão
+                  <ImageIcon className="h-4 w-4 mr-2" />
+                  Baixar Imagem (PNG)
                 </>
               )}
             </Button>
@@ -188,100 +235,12 @@ export function Carteirinha() {
 
           {/* Container for printing - ensures correct sizing on paper */}
           <div className="flex flex-col items-center justify-center gap-8 print:block print:w-full">
-            
-            <div ref={printRef} className="flex flex-col gap-8 p-4 bg-[#ffffff]">
-              {/* Frente da Carteirinha */}
-            <div className="w-[8.5cm] h-[5.4cm] rounded-xl border border-[#d1d5db] bg-[#ffffff] shadow-lg relative overflow-hidden flex flex-col print:shadow-none print:border-[#9ca3af] print:mb-[1cm] print:mx-auto" style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
-              {/* Header */}
-              <div className="w-full h-10 bg-[#1d4ed8] flex items-center justify-center shrink-0">
-                <h2 className="text-[#ffffff] font-bold text-[10px] tracking-widest uppercase">Secretaria Municipal de Saúde</h2>
-              </div>
-              
-              <div className="flex-1 flex p-3 gap-3">
-                {/* Photo */}
-                <div className="w-[2.5cm] h-[3.33cm] bg-[#f3f4f6] rounded border border-[#e5e7eb] shrink-0 overflow-hidden">
-                  <img src={selectedReg.photoUrl} alt="Foto" className="w-full h-full object-cover" />
-                </div>
-                
-                {/* Info */}
-                <div className="flex-1 flex flex-col justify-between py-1">
-                  <div>
-                    <p className="text-[8px] text-[#6b7280] font-bold uppercase tracking-wider">Nome do Beneficiário</p>
-                    <p className="text-[10px] font-bold leading-tight text-[#111827] mt-0.5 whitespace-normal break-words">{selectedReg.fullName}</p>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <p className="text-[8px] text-[#6b7280] font-bold uppercase tracking-wider">CPF</p>
-                      <p className="text-[10px] font-bold text-[#111827]">{selectedReg.cpf}</p>
-                    </div>
-                    <div>
-                      <p className="text-[8px] text-[#6b7280] font-bold uppercase tracking-wider">Nascimento</p>
-                      <p className="text-[10px] font-bold text-[#111827]">{selectedReg.birthDate}</p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-[8px] text-[#6b7280] font-bold uppercase tracking-wider">CID 10</p>
-                    <p className="text-[10px] font-bold text-[#111827]">{selectedReg.cid || 'M79.7'}</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="h-8 bg-[#f9fafb] border-t border-[#e5e7eb] flex items-center justify-center shrink-0">
-                <p className="text-[10px] font-bold text-[#1e40af] tracking-wide uppercase">Pessoa com Fibromialgia</p>
-              </div>
-            </div>
-
-            {/* Verso da Carteirinha */}
-            <div className="w-[8.5cm] h-[5.4cm] rounded-xl border border-[#d1d5db] bg-[#ffffff] shadow-lg relative flex flex-col justify-between p-4 print:shadow-none print:border-[#9ca3af] print:mx-auto" style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
-              
-              <div className="flex justify-between items-start">
-                <div className="space-y-3">
-                  <div>
-                    <p className="text-[8px] text-[#6b7280] font-bold uppercase tracking-wider">Registro CIPF</p>
-                    <p className="text-xs font-mono font-bold text-[#111827]">{formatRegistro(selectedReg.id)}</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-[8px] text-[#6b7280] font-bold uppercase tracking-wider">Emissão</p>
-                      <p className="text-[10px] font-bold text-[#111827]">{selectedReg.issueDate}</p>
-                    </div>
-                    <div>
-                      <p className="text-[8px] text-[#6b7280] font-bold uppercase tracking-wider">Validade</p>
-                      <p className="text-[10px] font-bold text-[#dc2626]">{selectedReg.expiryDate}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-end">
-                  <div className="p-1 bg-[#ffffff] border border-[#e5e7eb] rounded-lg">
-                    <QRCodeSVG 
-                      value={`${getBaseUrl()}/?id=${selectedReg.id}&sig=${selectedReg.visualSignature || ''}`} 
-                      size={56}
-                      level="L"
-                    />
-                  </div>
-                  <div className="text-center mt-1 w-full">
-                    <p className="text-[7px] text-[#6b7280] uppercase tracking-wider">Assinatura</p>
-                    <p className="text-[9px] font-mono font-bold tracking-widest text-[#111827]">{selectedReg.visualSignature || '------'}</p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="text-[7px] text-[#4b5563] text-justify leading-tight mt-3">
-                Esta carteira é de uso pessoal e intransferível, válida em todo o território municipal. 
-                Garante atendimento prioritário em órgãos públicos, empresas públicas, empresas concessionárias 
-                de serviços públicos e empresas privadas, conforme Lei Municipal nº 2.690/2026.
-              </div>
-
-              <div className="mt-2 text-center border-t border-[#e5e7eb] pt-1.5">
-                <p className="text-[7px] text-[#6b7280] font-medium">Verifique a autenticidade pelo QR Code</p>
-              </div>
-            </div>
-
-            </div>
+            <CarteirinhaPreview 
+              ref={printRef} 
+              registration={selectedReg} 
+              photoDataUri={photoDataUri} 
+              onImageLoad={() => setIsImageLoaded(true)}
+            />
           </div>
         </div>
       )}
