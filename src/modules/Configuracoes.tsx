@@ -2,10 +2,12 @@ import { BadgeCheck, Clock, KeyRound, ShieldCheck, UserCog } from 'lucide-react'
 import { getSessionSecurityConfig, useAppStore, type AppUser } from '@/store/useAppStore';
 import { getRoleLabel, hasPermission, type Permission, type UserRole } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
+import { isSupabaseConfigured } from '@/lib/supabase';
 
 const APP_VERSION = String((import.meta as any).env?.VITE_APP_VERSION || '1.0.0');
 const AUTH_MIGRATION_STATUS = 'Preparado para migrar para Supabase Auth/Backend seguro';
 const IS_PRODUCTION = Boolean((import.meta as any).env?.PROD);
+const APP_ORIGIN = typeof window !== 'undefined' ? window.location.origin : 'desconhecido';
 
 const TEST_USERS: Array<{ role: UserRole; name: string; description: string }> = [
   { role: 'admin', name: 'ADMINISTRADOR TESTE', description: 'Acesso total ao sistema.' },
@@ -83,6 +85,28 @@ export function Configuracoes() {
           <KeyRound className="mb-3 h-6 w-6 text-[#8a6500]" />
           <p className="text-sm font-black text-[#17324d]">Autenticacao</p>
           <p className="mt-2 text-sm text-[#617184]">{AUTH_MIGRATION_STATUS}</p>
+        </div>
+      </div>
+
+      <div className="institutional-panel rounded-[1.25rem] p-6">
+        <div className="mb-5">
+          <h3 className="text-lg font-black text-[#17324d]">Status do sistema</h3>
+          <p className="text-sm text-[#617184]">Resumo rapido para suporte quando algo nao abrir, salvar ou validar.</p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2">
+          {[
+            ['Supabase', isSupabaseConfigured ? 'Configurado' : 'Nao configurado', isSupabaseConfigured],
+            ['Hospedagem', 'Firebase Hosting / Vite estatico', true],
+            ['Ambiente', IS_PRODUCTION ? 'Producao' : 'Local / desenvolvimento', true],
+            ['Origem atual', APP_ORIGIN, true],
+            ['Exportacao Excel', 'Desativada: usar CSV/PDF para reduzir risco', true],
+            ['Banco ativo', 'Supabase', true]
+          ].map(([label, value, ok]) => (
+            <div key={String(label)} className={`rounded-xl border p-4 ${ok ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+              <p className={`text-xs font-black uppercase tracking-wide ${ok ? 'text-green-700' : 'text-red-700'}`}>{String(label)}</p>
+              <p className="mt-1 break-words text-sm font-semibold text-[#17324d]">{String(value)}</p>
+            </div>
+          ))}
         </div>
       </div>
 

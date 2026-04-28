@@ -17,7 +17,6 @@ import {
   Download,
   FileBadge2,
   X,
-  FileSpreadsheet,
   FileDown,
   CalendarClock,
   Filter,
@@ -47,7 +46,6 @@ import {
   type RegistrationStatus
 } from '@/lib/registration-status';
 import jsPDF from 'jspdf';
-import * as XLSX from 'xlsx';
 
 type TimelineEntry = {
   action: string;
@@ -79,6 +77,7 @@ type EditRegistrationForm = {
 
 const PRINT_REGISTRATION_STORAGE_KEY = 'cipf_print_registration_id';
 type StatusFilter = 'all' | RegistrationStatus;
+type ReviewFilter = 'all' | 'document_issues' | 'archived';
 
 // Dashboard is the administrative control center: list/filter records, edit
 // non-CPF fields, export reports, inspect history and start print preview.
@@ -121,6 +120,30 @@ function getExpiryHighlight(reg: CIPFRegistration) {
   if (diffDays < 0 || normalizedStatus === 'expired') return 'border-l-4 border-l-red-500 bg-red-50/40';
   if (diffDays <= 30 && normalizedStatus === 'issued') return 'border-l-4 border-l-amber-400 bg-amber-50/40';
   return '';
+}
+
+function daysSinceBRDate(value?: string): number | null {
+  const date = parseBRDate(value || '');
+  if (!date) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.floor((today.getTime() - date.getTime()) / 86400000);
+}
+
+function getDocumentIssues(reg: CIPFRegistration): string[] {
+  const issues: string[] = [];
+  if (!reg.documentFileId && !reg.documentUrl) issues.push('Documento oficial ausente');
+  if (!reg.proofOfResidenceFileId && !reg.proofOfResidenceUrl) issues.push('Comprovante ausente');
+  if (!reg.medicalReportFileId && !reg.medicalReportUrl) issues.push('Laudo medico ausente');
+  if (!reg.photoFileId && !reg.photoUrl) issues.push('Foto ausente');
+
+  const proofDays = daysSinceBRDate(reg.proofOfResidenceDate);
+  if (proofDays !== null && proofDays > 90) issues.push('Comprovante com mais de 90 dias');
+
+  const reportDays = daysSinceBRDate(reg.medicalReportDate);
+  if (reportDays !== null && reportDays > 183) issues.push('Laudo com mais de 6 meses');
+
+  return issues;
 }
 
 function todayBR() {
@@ -175,6 +198,7 @@ export function Dashboard() {
   const [bairroFilter, setBairroFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expiryFilter, setExpiryFilter] = useState<'all' | 'expiring30'>('all');
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('all');
   const [loadError, setLoadError] = useState('');
 
   const [viewHistory, setViewHistory] = useState<{ fullName: string; entries: TimelineEntry[] } | null>(null);
@@ -367,6 +391,15 @@ export function Dashboard() {
     const estado = editForm.estado.trim().toUpperCase();
     const cid = editForm.cid.trim().toUpperCase();
     const cnsClean = toDigits(editForm.cns);
+    const criticalChanges = [
+      fullName !== editReg.fullName ? 'nome' : '',
+      cnsClean !== toDigits(editReg.cns || '') ? 'cartao SUS' : '',
+      editForm.medicalReportDate !== (editReg.medicalReportDate || '') ? 'data do laudo' : '',
+      editForm.proofOfResidenceDate !== (editReg.proofOfResidenceDate || '') ? 'data do comprovante' : '',
+      editForm.issueDate !== editReg.issueDate ? 'emissao' : '',
+      editForm.expiryDate !== editReg.expiryDate ? 'validade' : '',
+      editForm.status !== normalizeRegistrationStatus(editReg.status) ? 'status' : ''
+    ].filter(Boolean);
 
     if (fullName.length < 3) {
       alert('Informe um nome valido.');
@@ -380,6 +413,10 @@ export function Dashboard() {
       alert('Data de nascimento, emissao e validade sao obrigatorias.');
       return;
     }
+    const editReason = criticalChanges.length
+      ? requireReason(`Voce alterou campo(s) sensivel(is): ${criticalChanges.join(', ')}. Informe o motivo da edicao:`)
+      : 'Edicao administrativa sem alteracao critica';
+    if (!editReason) return;
 
     try {
       setIsSavingEdit(true);
@@ -429,7 +466,7 @@ export function Dashboard() {
       await writeAudit(
         'Edicao de Cadastro',
         editReg.id,
-        `Campos principais atualizados para ${fullName}; status=${editForm.status}; cns=${cnsClean ? 'informado' : 'nao-informado'}`
+        `${editReason}; campos atualizados para ${fullName}; status=${editForm.status}; cns=${cnsClean ? 'informado' : 'nao-informado'}`
       );
       setEditReg(null);
       setEditForm(null);
@@ -467,6 +504,7 @@ export function Dashboard() {
   const filteredRegistrations = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     return registrations.filter((reg) => {
+      const normalizedStatus = normalizeRegistrationStatus(reg.status);
       const nameMatch = reg.fullName.toLowerCase().includes(term);
       const cpfMatch = toDigits(reg.cpf).includes(toDigits(term));
       const cnsMatch = toDigits(reg.cns || '').includes(toDigits(term));
@@ -475,12 +513,19 @@ export function Dashboard() {
       const matchesSearch = !term || nameMatch || cpfMatch || cnsMatch || cidMatch || bairroMatch;
       const matchesCid = cidFilter === 'all' || (reg.cid || '') === cidFilter;
       const matchesBairro = bairroFilter === 'all' || (reg.bairro || '') === bairroFilter;
-      const matchesStatus = statusMatchesFilter(reg.status, statusFilter);
+      const matchesStatus =
+        statusFilter === 'all'
+          ? normalizedStatus !== 'cancelled' || reviewFilter === 'archived'
+          : statusMatchesFilter(reg.status, statusFilter);
       const matchesExpiry =
         expiryFilter === 'all' || (normalizeRegistrationStatus(reg.status) === 'issued' && isExpiringInDays(reg.expiryDate, 30));
-      return matchesSearch && matchesCid && matchesBairro && matchesStatus && matchesExpiry;
+      const matchesReview =
+        reviewFilter === 'all' ||
+        (reviewFilter === 'document_issues' && getDocumentIssues(reg).length > 0) ||
+        (reviewFilter === 'archived' && normalizedStatus === 'cancelled');
+      return matchesSearch && matchesCid && matchesBairro && matchesStatus && matchesExpiry && matchesReview;
     });
-  }, [registrations, searchTerm, cidFilter, bairroFilter, statusFilter, expiryFilter]);
+  }, [registrations, searchTerm, cidFilter, bairroFilter, statusFilter, expiryFilter, reviewFilter]);
 
   const stats = useMemo(
     () => {
@@ -493,6 +538,7 @@ export function Dashboard() {
         issued: byStatus('issued'),
         expired: byStatus('expired'),
         cancelled: byStatus('cancelled'),
+        documentIssues: registrations.filter((registration) => getDocumentIssues(registration).length > 0).length,
         expiring30: registrations.filter(
           (registration) => normalizeRegistrationStatus(registration.status) === 'issued' && isExpiringInDays(registration.expiryDate, 30)
         ).length,
@@ -508,6 +554,7 @@ export function Dashboard() {
     { label: 'Emitidas', value: stats.issued, icon: FileBadge2, tone: 'bg-[#eaf4ee] text-[#1f8a58]' },
     { label: 'Vencendo 30d', value: stats.expiring30, icon: Clock, tone: 'bg-[#fff8dc] text-[#8a6500]' },
     { label: 'Canceladas', value: stats.cancelled, icon: X, tone: 'bg-zinc-100 text-zinc-700' },
+    { label: 'Pend. docs', value: stats.documentIssues, icon: AlertTriangle, tone: 'bg-red-50 text-red-700' },
     { label: 'Resultado filtrado', value: stats.filtered, icon: Filter, tone: 'bg-[#f3f6f9] text-[#17324d]' }
   ];
 
@@ -593,7 +640,7 @@ export function Dashboard() {
 
   const handleDeleteClick = (reg: CIPFRegistration) => {
     if (!canDeleteRegistration) {
-      alert('Apenas administradores podem excluir registros.');
+      alert('Apenas administradores podem arquivar registros.');
       return;
     }
     setRegToDelete(reg);
@@ -604,18 +651,18 @@ export function Dashboard() {
     if (!regToDelete) return;
     if (deleteConfirmationText.trim().toUpperCase() !== regToDelete.fullName.trim().toUpperCase()) return;
     try {
-      await writeAudit('Exclusao de Registro', regToDelete.id, `Registro de ${regToDelete.fullName} excluido`);
+      await writeAudit('Registro Arquivado', regToDelete.id, `Arquivamento seguro de ${regToDelete.fullName}`);
       await Promise.all([
-        supabase.from('registrations').delete().eq('id', regToDelete.id),
-        supabase.from('public_validations').delete().eq('id', regToDelete.id),
-        supabase.from('registration_index').delete().eq('cpf', regToDelete.cpf)
+        supabase.from('registrations').update({ status: 'cancelled' }).eq('id', regToDelete.id),
+        supabase.from('public_validations').update({ status: 'cancelled' }).eq('id', regToDelete.id),
+        supabase.from('registration_index').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('cpf', toDigits(regToDelete.cpf))
       ]);
       setRegToDelete(null);
       setDeleteConfirmationText('');
       await loadData();
     } catch (error) {
       console.error(error);
-      alert('Erro ao excluir registro.');
+      alert('Erro ao arquivar registro.');
     }
   };
 
@@ -648,17 +695,13 @@ export function Dashboard() {
     await writeAudit('Exportacao CSV Dashboard');
   };
 
-  const handleExportExcel = async () => {
+  const handleExportExcelCompatibleCsv = async () => {
     if (!canExportDashboard) {
       alert('Apenas administradores podem exportar relatorios.');
       return;
     }
-    const rows = filteredRegistrations.map(normalizeForExport);
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(wb, ws, 'Dashboard');
-    XLSX.writeFile(wb, `dashboard_filtrado_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    await writeAudit('Exportacao Excel Dashboard');
+    await handleExportCsv();
+    await writeAudit('Exportacao CSV Compativel Excel');
   };
 
   const handleExportPdf = async () => {
@@ -723,6 +766,7 @@ export function Dashboard() {
     setBairroFilter('all');
     setStatusFilter('all');
     setExpiryFilter('all');
+    setReviewFilter('all');
   };
 
   return (
@@ -766,8 +810,8 @@ export function Dashboard() {
               <Button variant="outline" onClick={handleExportCsv} className="h-12">
                 <FileDown className="w-4 h-4 mr-2" /> CSV
               </Button>
-              <Button variant="outline" onClick={handleExportExcel} className="h-12">
-                <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel
+              <Button variant="outline" onClick={handleExportExcelCompatibleCsv} className="h-12">
+                <FileDown className="w-4 h-4 mr-2" /> CSV p/ Excel
               </Button>
               <Button variant="outline" onClick={handleExportPdf} className="h-12">
                 <Download className="w-4 h-4 mr-2" /> PDF
@@ -838,6 +882,15 @@ export function Dashboard() {
           >
             <option value="all">Validade: Todas</option>
             <option value="expiring30">Vencendo em 30 dias</option>
+          </select>
+          <select
+            value={reviewFilter}
+            onChange={(e) => setReviewFilter(e.target.value as ReviewFilter)}
+            className="h-12 rounded-xl border border-[#d9e1ea] bg-white px-3"
+          >
+            <option value="all">Revisao: normal</option>
+            <option value="document_issues">Pendencias documentais</option>
+            <option value="archived">Arquivados</option>
           </select>
           <Button type="button" variant="outline" onClick={clearFilters} className="h-12">
             Limpar filtros
@@ -947,7 +1000,7 @@ export function Dashboard() {
                       </Button>
                     )}
                     {canDeleteRegistration && (
-                      <Button variant="ghost" size="icon" onClick={() => handleDeleteClick(reg)} title="Excluir">
+                      <Button variant="ghost" size="icon" onClick={() => handleDeleteClick(reg)} title="Arquivar">
                         <Trash2 className="w-4 h-4 text-red-600" />
                       </Button>
                     )}
@@ -1006,7 +1059,7 @@ export function Dashboard() {
                             </Button>
                           )}
                           {canDeleteRegistration && (
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteClick(reg)} title="Excluir">
+                            <Button variant="ghost" size="icon" onClick={() => handleDeleteClick(reg)} title="Arquivar">
                               <Trash2 className="w-4 h-4 text-red-600" />
                             </Button>
                           )}
@@ -1319,13 +1372,13 @@ export function Dashboard() {
         <ModalShell
           open={Boolean(regToDelete)}
           onClose={() => setRegToDelete(null)}
-          title="Confirmar Exclusao"
-          description={`Para excluir ${regToDelete.fullName}, digite o nome completo abaixo.`}
+          title="Arquivar cadastro"
+          description={`Para arquivar ${regToDelete.fullName}, digite o nome completo abaixo. O registro ficara oculto da lista normal, mas permanecera recuperavel e auditavel.`}
           size="md"
           footer={
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setRegToDelete(null)}>Cancelar</Button>
-              <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={confirmDelete}>Excluir</Button>
+              <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={confirmDelete}>Arquivar</Button>
             </div>
           }
         >

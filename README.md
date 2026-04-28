@@ -49,4 +49,5 @@ Aplicacao web para cadastro, aprovacao, emissao, impressao e validacao publica d
 
 - Nao coloque `sb_secret`, service role key, senha do banco ou chaves administrativas em variaveis `VITE_*`.
 - `VITE_SUPABASE_ANON_KEY` e publica por natureza em app frontend; a protecao real deve vir de RLS/Supabase Auth ou backend confiavel.
+- A exportacao Excel nativa foi removida para evitar dependencia vulneravel; use CSV compativel com Excel ou PDF.
 - Leia `SECURITY.md` e `AI_HANDOFF.md` antes de alterar regras de permissao, validacao publica ou workflow da carteirinha.

@@ -19,6 +19,7 @@ const CHUNK_SIZE = 700000;
 const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 const ACCEPTED_DOC_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
 const CID_DEFAULT = 'M79.7';
+const DRAFT_STORAGE_KEY = 'cipf_registration_draft_v1';
 
 type UploadField = 'documentFile' | 'proofOfResidenceFile' | 'medicalReportFile' | 'photoFile';
 
@@ -30,6 +31,13 @@ const INITIAL_UPLOAD_PROGRESS: Record<UploadField, number> = {
 };
 
 const normalizeText = (value: string) => value.toUpperCase().replace(/\s+/g, ' ').trim();
+const normalizeLookupText = (value = '') =>
+  value
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
 
 // Shared validation for required uploads. Uploaded files are converted to
 // Base64 and stored in Supabase chunks to avoid oversized single-row payloads.
@@ -333,7 +341,9 @@ export function Cadastro() {
   const [submitError, setSubmitError] = useState('');
   const [uploadProgress, setUploadProgress] = useState(INITIAL_UPLOAD_PROGRESS);
   const [currentStep, setCurrentStep] = useState(0);
-  const { currentUser } = useAppStore();
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const { currentUser, registrations, fetchRegistrations } = useAppStore();
 
   const {
     register,
@@ -394,6 +404,96 @@ export function Cadastro() {
   const progressPercent = Math.round(((currentStep + 1) / steps.length) * 100);
   const isReviewStep = currentStep === steps.length - 1;
 
+  useEffect(() => {
+    if (hasPermission(currentUser, 'viewDashboard')) {
+      fetchRegistrations().catch(() => null);
+    }
+  }, [currentUser, fetchRegistrations]);
+
+  useEffect(() => {
+    const rawDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!rawDraft) return;
+    try {
+      const parsed = JSON.parse(rawDraft) as Partial<Record<keyof FormData, string>>;
+      reset(parsed as Partial<FormData>);
+      setDraftRestored(true);
+      setDraftSavedAt(Date.now());
+    } catch {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    }
+  }, [reset]);
+
+  useEffect(() => {
+    if (registeredData) return;
+    const draft = {
+      fullName: formValues.fullName || '',
+      cpf: formValues.cpf || '',
+      cns: formValues.cns || '',
+      phone: formValues.phone || '',
+      birthDate: formValues.birthDate || '',
+      legalGuardian: formValues.legalGuardian || '',
+      cep: formValues.cep || '',
+      logradouro: formValues.logradouro || '',
+      bairro: formValues.bairro || '',
+      cidade: formValues.cidade || '',
+      estado: formValues.estado || '',
+      proofOfResidenceDate: formValues.proofOfResidenceDate || '',
+      medicalReportDate: formValues.medicalReportDate || '',
+      cid: formValues.cid || '',
+      justificativaCid: formValues.justificativaCid || '',
+      crm: formValues.crm || ''
+    };
+    const hasDraftContent = Object.values(draft).some((value) => String(value || '').trim());
+    if (!hasDraftContent) return;
+    const timer = window.setTimeout(() => {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      setDraftSavedAt(Date.now());
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [formValues, registeredData]);
+
+  const discardDraft = () => {
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    setDraftSavedAt(null);
+    setDraftRestored(false);
+    reset();
+    resetUploadProgress();
+    setCurrentStep(0);
+  };
+
+  const possibleDuplicates = useMemo(() => {
+    const name = normalizeLookupText(formValues.fullName || '');
+    const cpfDigits = String(formValues.cpf || '').replace(/\D/g, '');
+    if (name.length < 8 || !formValues.birthDate) return [];
+    return registrations
+      .filter((reg) => {
+        const sameBirth = reg.birthDate === formValues.birthDate;
+        const differentCpf = cpfDigits && reg.cpf !== cpfDigits;
+        const regName = normalizeLookupText(reg.fullName);
+        const nameLooksSimilar = regName.includes(name) || name.includes(regName) || regName.split(' ')[0] === name.split(' ')[0];
+        return sameBirth && differentCpf && nameLooksSimilar;
+      })
+      .slice(0, 3);
+  }, [registrations, formValues.fullName, formValues.birthDate, formValues.cpf]);
+
+  const isMinor = () => {
+    if (!birthDateValue || birthDateValue.length < 10) return false;
+    const age = getAgeFromBRDate(birthDateValue);
+    return age !== null && age < 18;
+  };
+
+  const reviewWarnings = useMemo(() => {
+    const warnings: string[] = [];
+    if (possibleDuplicates.length) warnings.push(`Possivel duplicidade: ${possibleDuplicates.map((reg) => reg.fullName).join(', ')}`);
+    if ((formValues.cid || '').toUpperCase() !== CID_DEFAULT) warnings.push('CID diferente de M79.7 exige justificativa medica consistente.');
+    if (isMinor()) warnings.push('Titular menor de idade: confira responsavel legal e documento.');
+    if (!formValues.cns) warnings.push('Cartao SUS nao informado. O campo e opcional, mas confira se a Secretaria deseja registrar.');
+    if (!documentFileValue?.[0] || !proofOfResidenceFileValue?.[0] || !medicalReportFileValue?.[0] || !photoFileValue?.[0]) {
+      warnings.push('Confira todos os anexos. Rascunhos recuperam campos de texto, mas nao recuperam arquivos selecionados.');
+    }
+    return warnings;
+  }, [possibleDuplicates, formValues.cid, formValues.cns, documentFileValue, proofOfResidenceFileValue, medicalReportFileValue, photoFileValue, birthDateValue]);
+
   const goToNextStep = async () => {
     const fields = steps[currentStep].fields;
     const isStepValid = fields.length === 0 || (await trigger(fields, { shouldFocus: true }));
@@ -427,12 +527,6 @@ export function Cadastro() {
   const resetUploadProgress = () => setUploadProgress(INITIAL_UPLOAD_PROGRESS);
   const updateUploadProgress = (field: UploadField, value: number) => {
     setUploadProgress((prev) => ({ ...prev, [field]: Math.max(0, Math.min(100, value)) }));
-  };
-
-  const isMinor = () => {
-    if (!birthDateValue || birthDateValue.length < 10) return false;
-    const age = getAgeFromBRDate(birthDateValue);
-    return age !== null && age < 18;
   };
 
   const handleRemoveFile = (fieldName: keyof FormData) => {
@@ -639,6 +733,9 @@ export function Cadastro() {
 
       setUploadStep('Cadastro finalizado com sucesso.');
       setRegisteredData({ fullName: data.fullName, cpf: data.cpf, cns: cnsClean ? formatCNS(cnsClean) : undefined });
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      setDraftSavedAt(null);
+      setDraftRestored(false);
       reset();
       setCurrentStep(0);
       resetUploadProgress();
@@ -713,6 +810,19 @@ export function Cadastro() {
         <p className="text-[#5E6B7A] mt-2 text-lg">
           Preencha os dados para solicitar a Carteira de Identificação da Pessoa com Fibromialgia.
         </p>
+        {(draftSavedAt || draftRestored) && (
+          <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-black">{draftRestored ? 'Rascunho recuperado automaticamente' : 'Rascunho salvo automaticamente'}</p>
+              <p className="mt-1">
+                Campos de texto ficam salvos neste computador. Por segurança do navegador, arquivos anexados precisam ser selecionados novamente.
+              </p>
+            </div>
+            <Button type="button" variant="outline" onClick={discardDraft} className="h-10 shrink-0 border-amber-300 bg-white">
+              Descartar rascunho
+            </Button>
+          </div>
+        )}
       </div>
       <div className="bg-white/85 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/30 overflow-hidden">
         <div className="p-6 sm:p-8 md:p-12">
@@ -1007,6 +1117,19 @@ export function Cadastro() {
               <div className="mb-6 rounded-2xl border border-[#b9d7c7] bg-[#edf7f1] p-4 text-sm text-[#166534]">
                 Confira os dados antes de salvar. Se algo estiver errado, volte para a etapa correspondente.
               </div>
+              {reviewWarnings.length > 0 && (
+                <div className="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <p className="mb-2 font-black">Pontos para conferência antes de salvar</p>
+                  <ul className="space-y-1">
+                    {reviewWarnings.map((warning) => (
+                      <li key={warning} className="flex gap-2">
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>{warning}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-2">
                 {reviewItems.map(([label, value]) => (
                   <div key={label} className="rounded-xl border border-[#e3e9ef] bg-[#f8fafc] p-4">

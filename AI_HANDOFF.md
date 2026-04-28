@@ -46,6 +46,8 @@ Fluxo principal:
 - Legados aceitos temporariamente: `active` e tratado como `issued`; `pending` e tratado como `under_review`.
 - Validacao publica positiva somente para `issued` (e legado `active`) com validade nao vencida.
 - Cancelamento exige motivo; renovacao volta para `approved`; segunda via exige motivo e auditoria.
+- Arquivamento operacional usa status `cancelled` em vez de exclusao fisica, para reduzir risco de perda acidental.
+- Exportacao Excel nativa foi removida junto com `xlsx`; manter CSV/PDF ou escolher biblioteca mais segura.
 
 ## Papeis e permissoes
 

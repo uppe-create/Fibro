@@ -11,6 +11,8 @@
 - `.env.local` fica ignorado pelo Git e `.env.example` nao deve conter senhas reais, hashes reais ou chaves secretas.
 - O arquivo `supabase-hardening-production.sql` deixa pronto um modelo de RLS mais restritivo para producao.
 - O arquivo `supabase-workflow-status-migration.sql` migra status antigos sem aplicar RLS restritiva.
+- A biblioteca `xlsx` foi removida; relatorios administrativos usam CSV compativel com Excel e PDF.
+- A exclusao operacional foi trocada por arquivamento seguro usando status `cancelled`, preservando auditoria e recuperabilidade.
 
 ## Ponto importante sobre chaves
 
