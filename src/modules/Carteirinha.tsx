@@ -3,7 +3,6 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { CIPFRegistration, useAppStore } from '@/store/useAppStore';
 import { Search, FileBadge2, Loader2, Image as ImageIcon } from 'lucide-react';
-import * as htmlToImage from 'html-to-image';
 import { CarteirinhaPreview } from '@/components/CarteirinhaPreview';
 import { loadCipfFileDataUri } from '@/lib/cipf-files';
 import { hasPermission } from '@/lib/permissions';
@@ -143,7 +142,8 @@ export function Carteirinha() {
         await fetchRegistrations();
       }
       
-      // Capture the element as a PNG using html-to-image
+      // Load the PNG generator only when the user actually downloads a card.
+      const htmlToImage = await import('html-to-image');
       const dataUrl = await htmlToImage.toPng(printRef.current, {
         quality: 1.0,
         pixelRatio: 3, // Higher scale for better print quality

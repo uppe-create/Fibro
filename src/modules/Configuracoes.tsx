@@ -8,6 +8,7 @@ const APP_VERSION = String((import.meta as any).env?.VITE_APP_VERSION || '1.0.0'
 const AUTH_MIGRATION_STATUS = 'Preparado para migrar para Supabase Auth/Backend seguro';
 const IS_PRODUCTION = Boolean((import.meta as any).env?.PROD);
 const APP_ORIGIN = typeof window !== 'undefined' ? window.location.origin : 'desconhecido';
+const AUTH_MODE = String((import.meta as any).env?.VITE_AUTH_MODE || 'local').toLowerCase();
 
 const TEST_USERS: Array<{ role: UserRole; name: string; description: string }> = [
   { role: 'admin', name: 'ADMINISTRADOR TESTE', description: 'Acesso total ao sistema.' },
@@ -98,6 +99,7 @@ export function Configuracoes() {
             ['Supabase', isSupabaseConfigured ? 'Configurado' : 'Nao configurado', isSupabaseConfigured],
             ['Hospedagem', 'Firebase Hosting / Vite estatico', true],
             ['Ambiente', IS_PRODUCTION ? 'Producao' : 'Local / desenvolvimento', true],
+            ['Modo de login', AUTH_MODE === 'supabase' ? 'Supabase Auth' : 'Credencial local MVP', true],
             ['Origem atual', APP_ORIGIN, true],
             ['Exportacao Excel', 'Desativada: usar CSV/PDF para reduzir risco', true],
             ['Banco ativo', 'Supabase', true]

@@ -13,6 +13,9 @@
 - O arquivo `supabase-workflow-status-migration.sql` migra status antigos sem aplicar RLS restritiva.
 - A biblioteca `xlsx` foi removida; relatorios administrativos usam CSV compativel com Excel e PDF.
 - A exclusao operacional foi trocada por arquivamento seguro usando status `cancelled`, preservando auditoria e recuperabilidade.
+- O app agora usa carregamento sob demanda de modulos e bibliotecas pesadas, reduzindo o JavaScript inicial exposto ao usuario.
+- `VITE_AUTH_MODE="supabase"` foi preparado para testes futuros com Supabase Auth sem desligar o login local atual.
+- `supabase-auth-rls-prep.sql` cria a base de perfis por usuario para migrar permissoes ao banco.
 
 ## Ponto importante sobre chaves
 
@@ -27,9 +30,11 @@ de Firestore se o banco ativo continuar sendo Supabase.
 
 1. Migrar login local para Supabase Auth, Edge Function ou backend confiavel.
 2. Criar usuarios com papeis reais: `admin`, `attendant`, `viewer`.
-3. Adicionar o papel em custom claims/JWT ou tabela de perfis protegida.
-4. Aplicar `supabase-hardening-production.sql`.
-5. Testar cadastro, edicao, impressao, dashboard e validacao publica com cada perfil.
+3. Aplicar/adaptar `supabase-auth-rls-prep.sql` e preencher `app_profiles`.
+4. Testar `VITE_AUTH_MODE="supabase"` em ambiente local com dados ficticios.
+5. Adicionar o papel em custom claims/JWT ou manter tabela de perfis protegida.
+6. Aplicar `supabase-hardening-production.sql`.
+7. Testar cadastro, edicao, impressao, dashboard e validacao publica com cada perfil.
 
 ## Fluxo operacional atual
 

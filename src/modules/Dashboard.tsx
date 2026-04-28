@@ -51,6 +51,7 @@ import {
   buildStats,
   datePlusYearsBR,
   filterDashboardRegistrations,
+  getDocumentIssues,
   getExpiryHighlight,
   maskCpf,
   normalizeForExport,
@@ -61,7 +62,6 @@ import {
   type ReviewFilter,
   type StatusFilter
 } from '@/lib/dashboard-utils';
-import jsPDF from 'jspdf';
 
 type TimelineEntry = {
   action: string;
@@ -421,6 +421,19 @@ export function Dashboard() {
 
   const ageStats = useMemo(() => buildAgeStats(filteredRegistrations), [filteredRegistrations]);
 
+  const operationalQueue = useMemo(
+    () =>
+      registrations
+        .filter((reg) => ['under_review', 'approved'].includes(normalizeRegistrationStatus(reg.status)))
+        .slice(0, 6),
+    [registrations]
+  );
+
+  const documentIssueQueue = useMemo(
+    () => registrations.filter((reg) => getDocumentIssues(reg).length > 0).slice(0, 6),
+    [registrations]
+  );
+
   const handleViewMedicalDoc = async (reg: CIPFRegistration) => {
     if (!canViewDocuments) {
       alert('Seu perfil nao permite abrir documentos anexos.');
@@ -550,6 +563,7 @@ export function Dashboard() {
       alert('Apenas administradores podem exportar relatorios.');
       return;
     }
+    const { default: jsPDF } = await import('jspdf');
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const now = new Date();
     doc.setFontSize(14);
@@ -754,6 +768,77 @@ export function Dashboard() {
             </div>
           );
         })}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="institutional-panel rounded-[1.25rem] p-4 sm:p-5">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-wide text-[#17324d]">Fila de aprovacao e emissao</h3>
+              <p className="mt-1 text-sm text-[#617184]">Cadastros que ainda precisam de decisao operacional.</p>
+            </div>
+            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-black text-blue-700">{operationalQueue.length}</span>
+          </div>
+          <div className="space-y-2">
+            {operationalQueue.map((reg) => (
+              <div key={reg.id} className="flex flex-col gap-3 rounded-xl border border-[#e3e9ef] bg-[#f8fafc] p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-[#17324d]">{reg.fullName}</p>
+                  <p className="text-xs text-[#617184]">
+                    {maskCpf(reg.cpf)} • {getStatusLabel(reg.status)} • Validade {reg.expiryDate || '-'}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={() => setDetailReg(reg)} className="h-9 rounded-xl">
+                    Ver ficha
+                  </Button>
+                  {canApproveRegistration && canApproveStatus(reg.status) && (
+                    <Button type="button" onClick={() => handleApproveRegistration(reg)} className="h-9 rounded-xl bg-blue-600 text-white hover:bg-blue-700">
+                      Aprovar
+                    </Button>
+                  )}
+                  {canIssueRegistration && canPrintCarteirinha && canIssueStatus(reg.status) && (
+                    <Button type="button" onClick={() => handleIssueAndPrint(reg)} className="h-9 rounded-xl bg-green-700 text-white hover:bg-green-800">
+                      Emitir
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+            {operationalQueue.length === 0 && <p className="rounded-xl border border-[#e3e9ef] bg-[#f8fafc] p-4 text-sm text-[#617184]">Nenhuma pendencia operacional agora.</p>}
+          </div>
+        </div>
+
+        <div className="institutional-panel rounded-[1.25rem] p-4 sm:p-5">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-wide text-[#17324d]">Revisao documental</h3>
+              <p className="mt-1 text-sm text-[#617184]">Itens com foto, documento, comprovante ou laudo pendente/vencido.</p>
+            </div>
+            <Button type="button" variant="outline" onClick={() => setReviewFilter('document_issues')} className="h-9 rounded-xl">
+              Filtrar
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {documentIssueQueue.map((reg) => {
+              const issues = getDocumentIssues(reg);
+              return (
+                <div key={reg.id} className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-bold text-[#17324d]">{reg.fullName}</p>
+                      <p className="text-xs text-amber-800">{issues.slice(0, 2).join(' • ')}</p>
+                    </div>
+                    <Button type="button" variant="outline" onClick={() => setDetailReg(reg)} className="h-9 rounded-xl border-amber-300 bg-white">
+                      Conferir
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+            {documentIssueQueue.length === 0 && <p className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">Nenhuma pendencia documental detectada.</p>}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -974,8 +1059,36 @@ export function Dashboard() {
                     !(canReissueRegistration && canReissueStatus(detailReg.status)) &&
                     !(canCancelRegistration && canCancelStatus(detailReg.status)) && (
                       <p className="text-sm text-[#617184]">Nenhuma acao operacional disponivel para este status.</p>
-                    )}
+                  )}
                 </div>
+              </div>
+              <div className="rounded-2xl border border-[#d9e1ea] bg-white p-4">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-black text-[#17324d]">Checklist documental</p>
+                    <p className="mt-1 text-sm text-[#617184]">Conferencia rapida antes de aprovar, renovar ou emitir.</p>
+                  </div>
+                  <span
+                    className={`w-fit rounded-full px-3 py-1 text-xs font-black ${
+                      getDocumentIssues(detailReg).length === 0 ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-800'
+                    }`}
+                  >
+                    {getDocumentIssues(detailReg).length === 0 ? 'Sem pendencias' : `${getDocumentIssues(detailReg).length} pendencia(s)`}
+                  </span>
+                </div>
+                {getDocumentIssues(detailReg).length === 0 ? (
+                  <div className="rounded-xl border border-green-200 bg-green-50 p-3 text-sm font-semibold text-green-800">
+                    Documentos principais encontrados e datas dentro dos limites operacionais configurados.
+                  </div>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {getDocumentIssues(detailReg).map((issue) => (
+                      <div key={issue} className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
+                        {issue}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {[

@@ -15,12 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { daysUntil } from '@/lib/date';
 import { getStatusLabel, isPubliclyValidStatus } from '@/lib/registration-status';
-import { Html5Qrcode } from 'html5-qrcode';
-import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import prefeituraLogo from '@/assets/prefeitura-logo.png';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 // Public QR Code validation screen. Keep this privacy-preserving: do not query
 // registrations/documents here, only public_validations or validate_cipf.
@@ -200,6 +195,9 @@ export function Valida() {
   const extractImageFromPdf = async (file: File): Promise<File | null> => {
     // QR scanner accepts images. For PDF uploads we rasterize page 1 and scan it.
     try {
+      const pdfjsLib = await import('pdfjs-dist');
+      const pdfWorker = await import('pdfjs-dist/build/pdf.worker.mjs?url');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker.default;
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       const page = await pdf.getPage(1);
@@ -244,6 +242,7 @@ export function Valida() {
         fileToScan = extractedImage;
       }
 
+      const { Html5Qrcode } = await import('html5-qrcode');
       const html5QrCode = new Html5Qrcode('qr-reader-hidden');
       const decodedText = await html5QrCode.scanFile(fileToScan, true);
       const url = new URL(decodedText);

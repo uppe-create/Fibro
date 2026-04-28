@@ -3,15 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useEffect } from 'react';
+import React, { Suspense, useCallback, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Cadastro } from '@/modules/Cadastro';
-import { Carteirinha } from '@/modules/Carteirinha';
-import { Dashboard } from '@/modules/Dashboard';
-import { Configuracoes } from '@/modules/Configuracoes';
 import { Login } from '@/modules/Login';
-import { Valida } from '@/modules/Valida';
-import { DevTools } from '@/modules/DevTools';
 import {
   BadgeCheck,
   Bug,
@@ -35,10 +29,27 @@ import { Notifications } from '@/components/Notifications';
 import { canAccessTab, getDefaultTabForRole, getRoleLabel, hasPermission, type Permission } from '@/lib/permissions';
 import prefeituraLogo from '@/assets/prefeitura-logo.png';
 
+const Cadastro = React.lazy(() => import('@/modules/Cadastro').then((module) => ({ default: module.Cadastro })));
+const Carteirinha = React.lazy(() => import('@/modules/Carteirinha').then((module) => ({ default: module.Carteirinha })));
+const Configuracoes = React.lazy(() => import('@/modules/Configuracoes').then((module) => ({ default: module.Configuracoes })));
+const Dashboard = React.lazy(() => import('@/modules/Dashboard').then((module) => ({ default: module.Dashboard })));
+const DevTools = React.lazy(() => import('@/modules/DevTools').then((module) => ({ default: module.DevTools })));
+const Valida = React.lazy(() => import('@/modules/Valida').then((module) => ({ default: module.Valida })));
+
 const APP_VERSION = String((import.meta as any).env?.VITE_APP_VERSION || '1.0.0');
 const APP_NAME = 'Carteirinha de Fibromialgia';
 const SESSION_CHECK_INTERVAL_MS = 30_000;
 const IS_PRODUCTION = Boolean((import.meta as any).env?.PROD);
+
+function ModuleFallback() {
+  return (
+    <div className="flex min-h-[55vh] flex-col items-center justify-center rounded-[1.25rem] border border-[#e3e9ef] bg-white/80 py-12 text-[#617184]">
+      <Loader2 className="mb-3 h-7 w-7 animate-spin text-[#155c9c]" />
+      <p className="text-sm font-semibold text-[#17324d]">Carregando modulo...</p>
+      <p className="mt-1 text-xs">Abrindo somente o necessario para deixar o app mais leve.</p>
+    </div>
+  );
+}
 
 // Route guard for internal tabs. The public QR validation tab stays open;
 // every restricted tab declares the permission it needs below.
@@ -260,41 +271,43 @@ export default function App() {
 
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:py-6">
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <TabsContent value="valida" className="mt-0 outline-none">
-              <Valida />
-            </TabsContent>
+            <Suspense fallback={<ModuleFallback />}>
+              <TabsContent value="valida" className="mt-0 outline-none">
+                <Valida />
+              </TabsContent>
 
-            <TabsContent value="carteirinha" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewCarteirinha">
-                <Carteirinha />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="cadastro" className="mt-0 outline-none">
-              <ProtectedRoute permission="createRegistration" deniedMessage="Apenas administradores e atendentes podem cadastrar pessoas.">
-                <Cadastro />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="dashboard" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewDashboard" deniedMessage="Este perfil pode consultar carteirinhas, mas nao acessa o dashboard administrativo.">
-                <Dashboard />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="configuracoes" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewSettings" deniedMessage="Este perfil nao acessa configuracoes do sistema.">
-                <Configuracoes />
-              </ProtectedRoute>
-            </TabsContent>
-
-            {!IS_PRODUCTION && (
-              <TabsContent value="dev" className="mt-0 outline-none">
-                <ProtectedRoute permission="useDevTools" deniedMessage="Apenas administradores podem acessar ferramentas de desenvolvimento.">
-                  <DevTools />
+              <TabsContent value="carteirinha" className="mt-0 outline-none">
+                <ProtectedRoute permission="viewCarteirinha">
+                  <Carteirinha />
                 </ProtectedRoute>
               </TabsContent>
-            )}
+
+              <TabsContent value="cadastro" className="mt-0 outline-none">
+                <ProtectedRoute permission="createRegistration" deniedMessage="Apenas administradores e atendentes podem cadastrar pessoas.">
+                  <Cadastro />
+                </ProtectedRoute>
+              </TabsContent>
+
+              <TabsContent value="dashboard" className="mt-0 outline-none">
+                <ProtectedRoute permission="viewDashboard" deniedMessage="Este perfil pode consultar carteirinhas, mas nao acessa o dashboard administrativo.">
+                  <Dashboard />
+                </ProtectedRoute>
+              </TabsContent>
+
+              <TabsContent value="configuracoes" className="mt-0 outline-none">
+                <ProtectedRoute permission="viewSettings" deniedMessage="Este perfil nao acessa configuracoes do sistema.">
+                  <Configuracoes />
+                </ProtectedRoute>
+              </TabsContent>
+
+              {!IS_PRODUCTION && (
+                <TabsContent value="dev" className="mt-0 outline-none">
+                  <ProtectedRoute permission="useDevTools" deniedMessage="Apenas administradores podem acessar ferramentas de desenvolvimento.">
+                    <DevTools />
+                  </ProtectedRoute>
+                </TabsContent>
+              )}
+            </Suspense>
           </div>
         </main>
 

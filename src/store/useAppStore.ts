@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 import { logAuditEvent } from '@/lib/audit';
 import { hasPermission, normalizeRole, type UserRole } from '@/lib/permissions';
@@ -131,6 +132,8 @@ const clearLoginGuards = () => {
   localStorage.removeItem(LOGIN_LOCK_UNTIL_STORAGE_KEY);
 };
 
+const getAuthMode = (env: Record<string, unknown>) => String(env.VITE_AUTH_MODE || 'local').trim().toLowerCase();
+
 // MVP login supports one env user or a JSON array of users. Useful for testing
 // roles, but production should move to Supabase Auth or a backend.
 const readLocalCredentials = (env: Record<string, unknown>): LocalCredential[] => {
@@ -174,6 +177,27 @@ const sha256Hex = async (input: string): Promise<string> => {
     .join('');
 };
 
+const buildUserFromSupabaseAuth = async (user: SupabaseUser): Promise<AppUser> => {
+  let role = normalizeRole(user.app_metadata?.app_role || user.user_metadata?.app_role || user.user_metadata?.role);
+  let name = String(user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'Usuario Supabase').trim();
+
+  try {
+    const { data } = await supabase.from('app_profiles').select('full_name, role').eq('id', user.id).maybeSingle();
+    if (data?.role) role = normalizeRole(data.role);
+    if (data?.full_name) name = String(data.full_name).trim();
+  } catch {
+    // app_profiles is optional during migration. Metadata keeps the login usable
+    // until RLS/profile tables are fully enabled.
+  }
+
+  return {
+    id: user.id,
+    name: name.toUpperCase(),
+    email: user.email || `${user.id}@supabase.local`,
+    role
+  };
+};
+
 export const useAppStore = create<AppState>((set, get) => ({
   isAuthReady: true,
   currentUser: getLocalUserSession(),
@@ -209,6 +233,29 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   loginWithLocalCredentials: async (username: string, password: string) => {
     const env = (import.meta as any).env || {};
+    if (getAuthMode(env) === 'supabase') {
+      assertSupabaseConfigured();
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: username.trim(),
+        password
+      });
+      if (error || !data.user) throw new Error(error?.message || 'Credenciais invalidas no Supabase Auth.');
+
+      const authUser = await buildUserFromSupabaseAuth(data.user);
+      sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(authUser));
+      localStorage.setItem(SESSION_LOGIN_AT_STORAGE_KEY, String(Date.now()));
+      localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
+      set({ currentUser: authUser, isAuthReady: true });
+
+      await logAuditEvent({
+        action: 'Login com Supabase Auth',
+        userId: authUser.id,
+        userName: authUser.name,
+        reason: `Perfil ${authUser.role}`
+      });
+      return;
+    }
+
     const localCredentials = readLocalCredentials(env);
     const { loginMaxAttempts, lockoutMinutes } = getSessionSecurityConfig();
 
@@ -274,7 +321,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
   logout: async () => {
+    const env = (import.meta as any).env || {};
     const user = get().currentUser;
+    if (getAuthMode(env) === 'supabase') {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Session cleanup below still runs even if the network is unavailable.
+      }
+    }
     sessionStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
     localStorage.removeItem(SESSION_LOGIN_AT_STORAGE_KEY);
     localStorage.removeItem(SESSION_ACTIVITY_STORAGE_KEY);

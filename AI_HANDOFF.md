@@ -24,12 +24,15 @@ Fluxo principal:
 - `src/lib/registration-status.ts`: helpers centrais de status, labels, validade publica e workflow.
 - `src/modules/Cadastro.tsx`: formulario completo, regras de negocio, upload de arquivos e gravacao do cadastro.
 - `src/modules/Dashboard.tsx`: filtros, KPIs, exportacoes, edicao, exclusao, historico e pre-visualizacao.
+- `src/lib/dashboard-utils.ts`: filtros, KPIs e verificacoes documentais puras do dashboard.
+- `src/lib/cadastro-utils.ts`: schema do cadastro, normalizacoes e helpers de upload/checksum.
 - `src/modules/Carteirinha.tsx`: busca de uma pessoa e download da carteirinha como PNG.
 - `src/components/CarteirinhaPreview.tsx`: layout visual imprimivel da carteirinha frente/verso.
 - `src/modules/Valida.tsx`: pagina publica do QR Code; deve retornar apenas dados minimos.
 - `src/lib/cipf-files.ts`: recupera documentos salvos em chunks Base64 no Supabase.
 - `supabase-schema.sql`: schema MVP atual.
 - `supabase-hardening-production.sql`: RLS mais restritiva para futuro uso real.
+- `supabase-auth-rls-prep.sql`: base de perfis para testar Supabase Auth antes de RLS restritiva.
 - `supabase-workflow-status-migration.sql`: migracao segura de status antigos para o fluxo profissional.
 - `SECURITY.md`: resumo dos cuidados de seguranca.
 
@@ -76,6 +79,8 @@ A funcao `validate_cipf(id, sig)` e o caminho preferido para validacao publica. 
 ## Seguranca
 
 O app ainda e um MVP frontend com chave publishable/anon no navegador. Isso nao e segredo, mas significa que a seguranca real precisa vir de RLS e/ou backend confiavel.
+
+O login atual fica em modo local por padrao. Para testar Supabase Auth sem quebrar o MVP, crie usuarios e perfis, depois use `VITE_AUTH_MODE="supabase"` em `.env.local`.
 
 Antes de uso real:
 
