@@ -1,5 +1,5 @@
 import { getAgeBucket, getAgeFromBRDate, isExpiringInDays, parseBRDate } from '@/lib/date';
-import { formatCNS } from '@/lib/utils';
+import { formatCNS, formatPhone } from '@/lib/utils';
 import {
   getStatusLabel,
   normalizeRegistrationStatus,
@@ -97,6 +97,10 @@ export function getDocumentIssues(reg: CIPFRegistration): string[] {
   return issues;
 }
 
+export function isReadyToPrint(reg: CIPFRegistration): boolean {
+  return normalizeRegistrationStatus(reg.status) === 'approved' && getDocumentIssues(reg).length === 0;
+}
+
 export function todayBR() {
   return new Date().toLocaleDateString('pt-BR');
 }
@@ -111,7 +115,7 @@ export function buildEditForm(reg: CIPFRegistration): EditRegistrationForm {
   return {
     fullName: reg.fullName || '',
     cns: formatCNS(reg.cns || ''),
-    phone: reg.phone || '',
+    phone: formatPhone(reg.phone || ''),
     birthDate: reg.birthDate || '',
     legalGuardian: reg.legalGuardian || '',
     cep: reg.cep || '',

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useAppStore, CIPFRegistration } from '@/store/useAppStore';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -30,7 +30,7 @@ import { parseBRDate } from '@/lib/date';
 import { loadCipfFileDataUri, openInNewTab } from '@/lib/cipf-files';
 import { logAuditEvent } from '@/lib/audit';
 import { hasPermission } from '@/lib/permissions';
-import { formatCNS } from '@/lib/utils';
+import { formatCNS, formatPhone } from '@/lib/utils';
 import {
   WORKFLOW_STATUS_OPTIONS,
   canApproveStatus,
@@ -53,6 +53,7 @@ import {
   filterDashboardRegistrations,
   getDocumentIssues,
   getExpiryHighlight,
+  isReadyToPrint,
   maskCpf,
   normalizeForExport,
   normalizeUpper,
@@ -71,6 +72,24 @@ type TimelineEntry = {
 };
 
 const PRINT_REGISTRATION_STORAGE_KEY = 'cipf_print_registration_id';
+const RECENT_REGISTRATIONS_STORAGE_KEY = 'cipf_recent_registrations';
+
+type RecentRegistration = {
+  id: string;
+  fullName: string;
+  cpf: string;
+  status: CIPFRegistration['status'];
+  accessedAt: number;
+};
+
+function readRecentRegistrations(): RecentRegistration[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_REGISTRATIONS_STORAGE_KEY) || '[]');
+    return Array.isArray(parsed) ? parsed.slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
 
 export function Dashboard() {
   const { registrations, currentUser, fetchRegistrations } = useAppStore();
@@ -87,6 +106,7 @@ export function Dashboard() {
   const canRenewRegistration = hasPermission(currentUser, 'renewRegistration');
   const canReissueRegistration = hasPermission(currentUser, 'reissueRegistration');
   const [searchTerm, setSearchTerm] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [cidFilter, setCidFilter] = useState('all');
   const [bairroFilter, setBairroFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -105,6 +125,7 @@ export function Dashboard() {
   const [editForm, setEditForm] = useState<EditRegistrationForm | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [detailReg, setDetailReg] = useState<CIPFRegistration | null>(null);
+  const [recentRegistrations, setRecentRegistrations] = useState<RecentRegistration[]>(() => readRecentRegistrations());
 
   const [previewReg, setPreviewReg] = useState<CIPFRegistration | null>(null);
   const [previewPhotoUri, setPreviewPhotoUri] = useState<string>('');
@@ -113,6 +134,45 @@ export function Dashboard() {
   React.useEffect(() => {
     loadData();
   }, []);
+
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const rememberRegistration = (reg: CIPFRegistration) => {
+    const next: RecentRegistration[] = [
+      {
+        id: reg.id,
+        fullName: reg.fullName,
+        cpf: reg.cpf,
+        status: reg.status,
+        accessedAt: Date.now()
+      },
+      ...recentRegistrations.filter((item) => item.id !== reg.id)
+    ].slice(0, 5);
+
+    setRecentRegistrations(next);
+    localStorage.setItem(RECENT_REGISTRATIONS_STORAGE_KEY, JSON.stringify(next));
+  };
+
+  const openRegistrationDetails = (reg: CIPFRegistration) => {
+    rememberRegistration(reg);
+    setDetailReg(reg);
+  };
+
+  const openRegistrationEdit = (reg: CIPFRegistration) => {
+    rememberRegistration(reg);
+    handleEditClick(reg);
+  };
 
   // Keep audit payloads consistent if auth changes later.
   const writeAudit = async (action: string, registrationId?: string, reason?: string) => {
@@ -685,16 +745,26 @@ export function Dashboard() {
         </div>
       )}
 
-      <div className="institutional-panel rounded-[1.25rem] p-4 sm:p-6">
+      <div className="institutional-panel sticky top-3 z-30 rounded-[1.25rem] p-4 shadow-[0_12px_35px_rgba(23,50,77,0.12)] sm:p-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
           <div className="lg:col-span-2 relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#86868B]" />
             <Input
+              ref={searchInputRef}
               placeholder="Nome, CPF, Cartao SUS, CID ou bairro..."
               className="h-12 pl-9"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  document.getElementById('dashboard-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+              }}
             />
+            <span className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-md border border-[#d9e1ea] bg-white px-2 py-0.5 text-[10px] font-bold text-[#617184] lg:block">
+              Ctrl K
+            </span>
           </div>
           <select
             value={cidFilter}
@@ -770,6 +840,45 @@ export function Dashboard() {
         })}
       </div>
 
+      {recentRegistrations.length > 0 && (
+        <div className="institutional-panel rounded-[1.25rem] p-4 sm:p-5">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black uppercase tracking-wide text-[#17324d]">Ultimos cadastros acessados</h3>
+              <p className="mt-1 text-sm text-[#617184]">Atalho local para voltar nos atendimentos recentes desta maquina.</p>
+            </div>
+            <Button type="button" variant="ghost" onClick={() => {
+              localStorage.removeItem(RECENT_REGISTRATIONS_STORAGE_KEY);
+              setRecentRegistrations([]);
+            }} className="h-9 rounded-xl text-[#617184]">
+              Limpar
+            </Button>
+          </div>
+          <div className="grid gap-2 md:grid-cols-5">
+            {recentRegistrations.map((recent) => {
+              const reg = registrations.find((item) => item.id === recent.id);
+              return (
+                <button
+                  key={recent.id}
+                  type="button"
+                  onClick={() => {
+                    if (reg) openRegistrationDetails(reg);
+                  }}
+                  disabled={!reg}
+                  className="rounded-xl border border-[#e3e9ef] bg-[#f8fafc] p-3 text-left transition hover:border-[#155c9c] hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <p className="truncate text-sm font-bold text-[#17324d]">{recent.fullName}</p>
+                  <p className="mt-1 text-xs text-[#617184]">{maskCpf(recent.cpf)}</p>
+                  <span className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black uppercase ${getStatusBadgeClass(reg?.status || recent.status)}`}>
+                    {getStatusLabel(reg?.status || recent.status)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <div className="institutional-panel rounded-[1.25rem] p-4 sm:p-5">
           <div className="mb-4 flex items-start justify-between gap-3">
@@ -789,7 +898,7 @@ export function Dashboard() {
                   </p>
                 </div>
                 <div className="flex shrink-0 flex-wrap gap-2">
-                  <Button type="button" variant="outline" onClick={() => setDetailReg(reg)} className="h-9 rounded-xl">
+                  <Button type="button" variant="outline" onClick={() => openRegistrationDetails(reg)} className="h-9 rounded-xl">
                     Ver ficha
                   </Button>
                   {canApproveRegistration && canApproveStatus(reg.status) && (
@@ -829,7 +938,7 @@ export function Dashboard() {
                       <p className="text-sm font-bold text-[#17324d]">{reg.fullName}</p>
                       <p className="text-xs text-amber-800">{issues.slice(0, 2).join(' • ')}</p>
                     </div>
-                    <Button type="button" variant="outline" onClick={() => setDetailReg(reg)} className="h-9 rounded-xl border-amber-300 bg-white">
+                    <Button type="button" variant="outline" onClick={() => openRegistrationDetails(reg)} className="h-9 rounded-xl border-amber-300 bg-white">
                       Conferir
                     </Button>
                   </div>
@@ -872,7 +981,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <div className="institutional-panel overflow-hidden rounded-[1.25rem]">
+      <div id="dashboard-results" className="institutional-panel scroll-mt-32 overflow-hidden rounded-[1.25rem]">
         <div className="flex items-center justify-between gap-3 border-b border-[#e3e9ef] bg-[#f8fafc] p-4 text-sm text-[#617184]">
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-[#155c9c]" /> Registros filtrados
@@ -898,7 +1007,10 @@ export function Dashboard() {
                       <p className="text-xs text-[#86868B]">{maskCpf(reg.cpf)}</p>
                       <p className="text-xs text-[#86868B]">CID: {reg.cid || '-'}</p>
                     </div>
-                    <span className={`rounded-full border px-2 py-1 text-xs font-bold uppercase ${getStatusBadgeClass(reg.status)}`}>{getStatusLabel(reg.status)}</span>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={`rounded-full border px-2 py-1 text-xs font-bold uppercase ${getStatusBadgeClass(reg.status)}`}>{getStatusLabel(reg.status)}</span>
+                      {isReadyToPrint(reg) && <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-black uppercase text-green-800">Pronto p/ imprimir</span>}
+                    </div>
                   </div>
                   <div className="text-xs text-[#86868B] mt-2">Bairro: {reg.bairro || '-'} | Validade: {reg.expiryDate}</div>
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -907,11 +1019,11 @@ export function Dashboard() {
                         <FileBadge2 className="w-4 h-4" />
                       </Button>
                     )}
-                    <Button variant="ghost" size="icon" onClick={() => setDetailReg(reg)} title="Ver detalhes">
+                    <Button variant="ghost" size="icon" onClick={() => openRegistrationDetails(reg)} title="Ver detalhes">
                       <Eye className="w-4 h-4" />
                     </Button>
                     {canEditRegistration && (
-                      <Button variant="ghost" size="icon" onClick={() => handleEditClick(reg)} title="Editar">
+                      <Button variant="ghost" size="icon" onClick={() => openRegistrationEdit(reg)} title="Editar">
                         <Pencil className="w-4 h-4" />
                       </Button>
                     )}
@@ -957,7 +1069,10 @@ export function Dashboard() {
                       <td className="px-4 py-3">{reg.bairro || '-'}</td>
                       <td className="px-4 py-3">{reg.expiryDate}</td>
                       <td className="px-4 py-3">
-                        <span className={`rounded-full border px-2 py-1 text-xs font-bold uppercase ${getStatusBadgeClass(reg.status)}`}>{getStatusLabel(reg.status)}</span>
+                        <div className="flex flex-col items-start gap-1">
+                          <span className={`rounded-full border px-2 py-1 text-xs font-bold uppercase ${getStatusBadgeClass(reg.status)}`}>{getStatusLabel(reg.status)}</span>
+                          {isReadyToPrint(reg) && <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-black uppercase text-green-800">Pronto p/ imprimir</span>}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex justify-end gap-1">
@@ -966,11 +1081,11 @@ export function Dashboard() {
                               <FileBadge2 className="w-4 h-4" />
                             </Button>
                           )}
-                          <Button variant="ghost" size="icon" onClick={() => setDetailReg(reg)} title="Ver detalhes">
+                          <Button variant="ghost" size="icon" onClick={() => openRegistrationDetails(reg)} title="Ver detalhes">
                             <Eye className="w-4 h-4" />
                           </Button>
                           {canEditRegistration && (
-                            <Button variant="ghost" size="icon" onClick={() => handleEditClick(reg)} title="Editar cadastro">
+                            <Button variant="ghost" size="icon" onClick={() => openRegistrationEdit(reg)} title="Editar cadastro">
                               <Pencil className="w-4 h-4" />
                             </Button>
                           )}
@@ -1014,6 +1129,11 @@ export function Dashboard() {
                   <div>
                     <p className="text-xs font-black uppercase tracking-wide text-[#617184]">Status atual</p>
                     <p className="mt-1 text-lg font-black text-[#17324d]">{getStatusLabel(detailReg.status)}</p>
+                    {isReadyToPrint(detailReg) && (
+                      <p className="mt-2 w-fit rounded-full bg-green-100 px-3 py-1 text-xs font-black uppercase text-green-800">
+                        Pronto para imprimir
+                      </p>
+                    )}
                   </div>
                   <span className={`w-fit rounded-full border px-3 py-1 text-xs font-black uppercase ${getStatusBadgeClass(detailReg.status)}`}>
                     Validade: {detailReg.expiryDate}
@@ -1215,7 +1335,7 @@ export function Dashboard() {
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Telefone</span>
-                  <Input value={editForm.phone} onChange={(e) => updateEditField('phone', e.target.value)} className="h-11" />
+                  <Input value={editForm.phone} onChange={(e) => updateEditField('phone', formatPhone(e.target.value))} className="h-11" />
                 </label>
                 <label className="space-y-1">
                   <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Cartao SUS</span>

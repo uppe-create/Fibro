@@ -41,6 +41,8 @@ type FileUploadFieldProps = {
   isSubmitting: boolean;
 };
 
+const HEAVY_FILE_WARNING_BYTES = 3 * 1024 * 1024;
+
 function FileUploadField({
   id,
   label,
@@ -69,6 +71,7 @@ function FileUploadField({
 
   const isImage = Boolean(file?.type?.startsWith('image/'));
   const canPreview = hasFile && Boolean(previewUrl);
+  const isHeavyFile = Boolean(file && file.size >= HEAVY_FILE_WARNING_BYTES);
 
   return (
     <div className="space-y-3">
@@ -141,6 +144,12 @@ function FileUploadField({
             {isImage && previewUrl && (
               <div className="mt-3 rounded-lg overflow-hidden border border-green-200 bg-white max-h-36">
                 <img src={previewUrl} alt={`Prévia ${label}`} className="w-full h-36 object-cover" />
+              </div>
+            )}
+
+            {isHeavyFile && (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                Arquivo pesado ({formatFileSize(file?.size)}). Pode demorar um pouco para salvar; se travar, tente uma foto/arquivo menor.
               </div>
             )}
 

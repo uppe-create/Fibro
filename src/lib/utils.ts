@@ -23,11 +23,13 @@ export function formatDate(value: string) {
 }
 
 export function formatPhone(value: string) {
-  return value
-    .replace(/\D/g, "")
-    .replace(/(\d{2})(\d)/, "($1) $2")
-    .replace(/(\d{4,5})(\d{4})/, "$1-$2")
-    .replace(/(-\d{4})\d+?$/, "$1");
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  if (digits.length <= 2) return digits.replace(/(\d{1,2})/, "($1");
+  const area = digits.slice(0, 2);
+  const number = digits.slice(2);
+  if (number.length <= 4) return `(${area}) ${number}`;
+  if (digits.length <= 10) return `(${area}) ${number.slice(0, 4)}-${number.slice(4)}`;
+  return `(${area}) ${number.slice(0, 5)}-${number.slice(5)}`;
 }
 
 export function formatCNS(value: string) {
