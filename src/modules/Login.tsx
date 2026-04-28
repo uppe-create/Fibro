@@ -3,7 +3,6 @@ import { Button } from '@/components/ui/button';
 import { Loader2, LockKeyhole, ShieldAlert, User } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { getSessionSecurityConfig, useAppStore } from '@/store/useAppStore';
-import prefeituraLogo from '@/assets/prefeitura-logo.png';
 
 export function Login() {
   const { loginWithLocalCredentials } = useAppStore();
@@ -30,8 +29,10 @@ export function Login() {
   return (
     <div className="space-y-5">
       <div className="text-center">
-        <img src={prefeituraLogo} alt="Prefeitura de Ipero" className="mx-auto h-14 w-auto object-contain" />
-        <h2 className="mt-5 text-xl font-black text-[#17324d]">Acesso administrativo</h2>
+        <div className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-[#eaf4ee] text-[#166534]">
+          <LockKeyhole className="h-5 w-5" />
+        </div>
+        <h2 className="text-xl font-black text-[#17324d]">Acesso administrativo</h2>
         <p className="mt-1 text-sm text-[#617184]">Entre para gerenciar a Carteirinha de Fibromialgia.</p>
       </div>
 
