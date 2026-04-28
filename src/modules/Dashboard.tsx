@@ -1,200 +1,555 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAppStore, CIPFRegistration } from '@/store/useAppStore';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, AlertTriangle, Eye, ShieldAlert, FileText, Trash2, Users, Clock, CheckCircle, RefreshCw, Loader2, Download, FileBadge2, X } from 'lucide-react';
-import { db } from '../firebase';
-import { collection, query, where, getDocs, deleteDoc, doc, addDoc, getDoc } from 'firebase/firestore';
+import { ModalShell } from '@/components/ui/modal-shell';
+import {
+  Search,
+  AlertTriangle,
+  ShieldAlert,
+  FileText,
+  Trash2,
+  Users,
+  Clock,
+  CheckCircle,
+  RefreshCw,
+  Loader2,
+  Download,
+  FileBadge2,
+  X,
+  FileSpreadsheet,
+  FileDown,
+  CalendarClock,
+  Filter,
+  Pencil,
+  Save,
+  Eye
+} from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import { CarteirinhaPreview } from '@/components/CarteirinhaPreview';
+import { getAgeBucket, getAgeFromBRDate, isExpiringInDays, parseBRDate } from '@/lib/date';
+import { loadCipfFileDataUri, openInNewTab } from '@/lib/cipf-files';
+import { logAuditEvent } from '@/lib/audit';
+import { hasPermission } from '@/lib/permissions';
+import { formatCNS } from '@/lib/utils';
+import {
+  WORKFLOW_STATUS_OPTIONS,
+  canApproveStatus,
+  canCancelStatus,
+  canIssueStatus,
+  canReissueStatus,
+  canRenewStatus,
+  getStatusBadgeClass,
+  getStatusLabel,
+  isPrintableStatus,
+  normalizeRegistrationStatus,
+  statusMatchesFilter,
+  type RegistrationStatus
+} from '@/lib/registration-status';
+import jsPDF from 'jspdf';
+import * as XLSX from 'xlsx';
+
+type TimelineEntry = {
+  action: string;
+  timestamp: string;
+  userName: string;
+  reason?: string;
+};
+
+type EditRegistrationForm = {
+  fullName: string;
+  cns: string;
+  phone: string;
+  birthDate: string;
+  legalGuardian: string;
+  cep: string;
+  logradouro: string;
+  bairro: string;
+  cidade: string;
+  estado: string;
+  cid: string;
+  justificativaCid: string;
+  crm: string;
+  proofOfResidenceDate: string;
+  medicalReportDate: string;
+  issueDate: string;
+  expiryDate: string;
+  status: CIPFRegistration['status'];
+};
+
+const PRINT_REGISTRATION_STORAGE_KEY = 'cipf_print_registration_id';
+type StatusFilter = 'all' | RegistrationStatus;
+
+// Dashboard is the administrative control center: list/filter records, edit
+// non-CPF fields, export reports, inspect history and start print preview.
+function toDigits(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+function maskCpf(cpf: string): string {
+  const digits = toDigits(cpf);
+  if (digits.length !== 11) return cpf;
+  return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '***.$2.***-**');
+}
+
+function normalizeForExport(reg: CIPFRegistration) {
+  return {
+    nome: reg.fullName,
+    cpf: toDigits(reg.cpf),
+    cartao_sus: toDigits(reg.cns || ''),
+    status: getStatusLabel(reg.status),
+    cid: reg.cid || '',
+    bairro: reg.bairro || '',
+    cidade: reg.cidade || '',
+    validade: reg.expiryDate,
+    emissao: reg.issueDate
+  };
+}
+
+function normalizeUpper(value: string): string {
+  return value.toUpperCase().replace(/\s+/g, ' ').trim();
+}
+
+function getExpiryHighlight(reg: CIPFRegistration) {
+  const normalizedStatus = normalizeRegistrationStatus(reg.status);
+  if (normalizedStatus === 'cancelled') return 'border-l-4 border-l-zinc-400 bg-zinc-50/60';
+  const expiry = parseBRDate(reg.expiryDate);
+  if (!expiry) return '';
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diffDays = Math.ceil((expiry.getTime() - today.getTime()) / 86400000);
+  if (diffDays < 0 || normalizedStatus === 'expired') return 'border-l-4 border-l-red-500 bg-red-50/40';
+  if (diffDays <= 30 && normalizedStatus === 'issued') return 'border-l-4 border-l-amber-400 bg-amber-50/40';
+  return '';
+}
+
+function todayBR() {
+  return new Date().toLocaleDateString('pt-BR');
+}
+
+function datePlusYearsBR(years: number) {
+  const date = new Date();
+  date.setFullYear(date.getFullYear() + years);
+  return date.toLocaleDateString('pt-BR');
+}
+
+function buildEditForm(reg: CIPFRegistration): EditRegistrationForm {
+  return {
+    fullName: reg.fullName || '',
+    cns: formatCNS(reg.cns || ''),
+    phone: reg.phone || '',
+    birthDate: reg.birthDate || '',
+    legalGuardian: reg.legalGuardian || '',
+    cep: reg.cep || '',
+    logradouro: reg.logradouro || '',
+    bairro: reg.bairro || '',
+    cidade: reg.cidade || '',
+    estado: reg.estado || '',
+    cid: reg.cid || '',
+    justificativaCid: reg.justificativaCid || '',
+    crm: reg.crm || '',
+    proofOfResidenceDate: reg.proofOfResidenceDate || '',
+    medicalReportDate: reg.medicalReportDate || '',
+    issueDate: reg.issueDate || '',
+    expiryDate: reg.expiryDate || '',
+    status: normalizeRegistrationStatus(reg.status)
+  };
+}
 
 export function Dashboard() {
   const { registrations, currentUser, fetchRegistrations } = useAppStore();
+  const canClearDatabase = hasPermission(currentUser, 'clearDatabase');
+  const canDeleteRegistration = hasPermission(currentUser, 'deleteRegistration');
+  const canEditRegistration = hasPermission(currentUser, 'editRegistration');
+  const canExportDashboard = hasPermission(currentUser, 'exportDashboard');
+  const canViewDocuments = hasPermission(currentUser, 'viewDocuments');
+  const canViewHistory = hasPermission(currentUser, 'viewHistory');
+  const canPrintCarteirinha = hasPermission(currentUser, 'printCarteirinha');
+  const canApproveRegistration = hasPermission(currentUser, 'approveRegistration');
+  const canIssueRegistration = hasPermission(currentUser, 'issueRegistration');
+  const canCancelRegistration = hasPermission(currentUser, 'cancelRegistration');
+  const canRenewRegistration = hasPermission(currentUser, 'renewRegistration');
+  const canReissueRegistration = hasPermission(currentUser, 'reissueRegistration');
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedReg, setSelectedReg] = useState<CIPFRegistration | null>(null);
-  const [viewLogs, setViewLogs] = useState<{ fullName: string, logs: any[] } | null>(null);
+  const [cidFilter, setCidFilter] = useState('all');
+  const [bairroFilter, setBairroFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [expiryFilter, setExpiryFilter] = useState<'all' | 'expiring30'>('all');
+  const [loadError, setLoadError] = useState('');
+
+  const [viewHistory, setViewHistory] = useState<{ fullName: string; entries: TimelineEntry[] } | null>(null);
   const [regToDelete, setRegToDelete] = useState<CIPFRegistration | null>(null);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
   const [showClearDbModal, setShowClearDbModal] = useState(false);
   const [clearDbConfirmation, setClearDbConfirmation] = useState('');
   const [isClearingDb, setIsClearingDb] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [editReg, setEditReg] = useState<CIPFRegistration | null>(null);
+  const [editForm, setEditForm] = useState<EditRegistrationForm | null>(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [detailReg, setDetailReg] = useState<CIPFRegistration | null>(null);
+
   const [previewReg, setPreviewReg] = useState<CIPFRegistration | null>(null);
   const [previewPhotoUri, setPreviewPhotoUri] = useState<string>('');
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-
-  const [filter, setFilter] = useState<'all' | 'expiring30'>('all');
 
   React.useEffect(() => {
     loadData();
   }, []);
 
+  // Keep audit payloads consistent if auth changes later.
+  const writeAudit = async (action: string, registrationId?: string, reason?: string) => {
+    await logAuditEvent({
+      action,
+      registrationId: registrationId || null,
+      userId: currentUser?.id || null,
+      userName: currentUser?.name || 'Sistema',
+      reason
+    });
+  };
+
+  const updateRegistrationWorkflow = async (
+    reg: CIPFRegistration,
+    nextStatus: RegistrationStatus,
+    action: string,
+    reason: string,
+    extraFields: Partial<Pick<CIPFRegistration, 'issueDate' | 'expiryDate'>> = {}
+  ) => {
+    const payload = { status: nextStatus, ...extraFields };
+    const indexPayload = { status: nextStatus, updated_at: new Date().toISOString() };
+
+    const { error: registrationError } = await supabase.from('registrations').update(payload).eq('id', reg.id);
+    if (registrationError) throw registrationError;
+
+    const { error: publicError } = await supabase.from('public_validations').update(payload).eq('id', reg.id);
+    if (publicError) throw publicError;
+
+    const { error: indexError } = await supabase.from('registration_index').update(indexPayload).eq('cpf', toDigits(reg.cpf));
+    if (indexError) throw indexError;
+
+    await writeAudit(action, reg.id, reason);
+
+    const updatedReg = { ...reg, ...payload };
+    setDetailReg((current) => (current?.id === reg.id ? updatedReg : current));
+    setPreviewReg((current) => (current?.id === reg.id ? updatedReg : current));
+    await loadData();
+    return updatedReg;
+  };
+
+  const requireReason = (message: string) => {
+    const reason = window.prompt(message);
+    const trimmed = reason?.trim();
+    if (!trimmed) {
+      alert('Informe um motivo para manter a auditoria completa.');
+      return null;
+    }
+    return trimmed;
+  };
+
+  const handleApproveRegistration = async (reg: CIPFRegistration) => {
+    if (!canApproveRegistration || !canApproveStatus(reg.status)) {
+      alert('Este cadastro nao pode ser aprovado pelo seu perfil ou pelo status atual.');
+      return;
+    }
+    try {
+      await updateRegistrationWorkflow(reg, 'approved', 'Cadastro Aprovado', 'Cadastro aprovado para emissao administrativa');
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message || 'Erro ao aprovar cadastro.');
+    }
+  };
+
+  const handleCancelRegistration = async (reg: CIPFRegistration) => {
+    if (!canCancelRegistration || !canCancelStatus(reg.status)) {
+      alert('Apenas administradores podem cancelar cadastros ativos.');
+      return;
+    }
+    const reason = requireReason('Digite o motivo do cancelamento da carteirinha:');
+    if (!reason) return;
+    try {
+      await updateRegistrationWorkflow(reg, 'cancelled', 'Carteirinha Cancelada', reason);
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message || 'Erro ao cancelar carteirinha.');
+    }
+  };
+
+  const handleRenewRegistration = async (reg: CIPFRegistration) => {
+    if (!canRenewRegistration || !canRenewStatus(reg.status)) {
+      alert('Este cadastro nao pode ser renovado pelo seu perfil ou pelo status atual.');
+      return;
+    }
+    const reason = requireReason('Digite o motivo da renovacao:');
+    if (!reason) return;
+    const issueDate = todayBR();
+    const expiryDate = datePlusYearsBR(2);
+    try {
+      await updateRegistrationWorkflow(reg, 'approved', 'Renovacao Iniciada', `${reason}; nova validade=${expiryDate}`, {
+        issueDate,
+        expiryDate
+      });
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message || 'Erro ao renovar cadastro.');
+    }
+  };
+
+  const handleReissueRegistration = async (reg: CIPFRegistration) => {
+    if (!canReissueRegistration || !canReissueStatus(reg.status)) {
+      alert('Apenas administradores podem registrar segunda via de carteirinhas emitidas.');
+      return;
+    }
+    const reason = requireReason('Digite o motivo da segunda via:');
+    if (!reason) return;
+    await writeAudit('Segunda Via Registrada', reg.id, reason);
+    await handlePreviewCarteirinha(reg);
+  };
+
+  const handleIssueAndPrint = async (reg: CIPFRegistration) => {
+    if (!canIssueRegistration || !canPrintCarteirinha || !canIssueStatus(reg.status)) {
+      alert('Apenas administradores podem emitir ou imprimir carteirinhas aprovadas.');
+      return;
+    }
+    try {
+      if (normalizeRegistrationStatus(reg.status) === 'approved') {
+        await updateRegistrationWorkflow(reg, 'issued', 'Carteirinha Emitida', 'Emissao administrativa para impressao', {
+          issueDate: todayBR(),
+          expiryDate: datePlusYearsBR(2)
+        });
+      } else {
+        await writeAudit('Acesso a Impressao', reg.id, 'Carteirinha ja emitida');
+      }
+      sessionStorage.setItem(PRINT_REGISTRATION_STORAGE_KEY, reg.id);
+      setPreviewReg(null);
+      setDetailReg(null);
+      useAppStore.getState().setActiveTab('carteirinha');
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message || 'Erro ao preparar impressao.');
+    }
+  };
+
   const handlePreviewCarteirinha = async (reg: CIPFRegistration) => {
+    if (!canPrintCarteirinha || !isPrintableStatus(reg.status)) {
+      alert('A pre-visualizacao de carteirinha fica disponivel somente para administradores e cadastros aprovados/emitidos.');
+      return;
+    }
     setPreviewReg(reg);
     setIsPreviewLoading(true);
-    setPreviewPhotoUri('');
-    
-    if (reg.photoFileId) {
-      try {
-        const docRef = doc(db, 'cipf_files', reg.photoFileId);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const fileData = docSnap.data();
-          if (fileData.data) {
-            setPreviewPhotoUri(fileData.data);
-          } else if (fileData.totalChunks) {
-            const chunkPromises = [];
-            for (let i = 0; i < fileData.totalChunks; i++) {
-              chunkPromises.push(getDoc(doc(db, 'cipf_files', reg.photoFileId, 'chunks', i.toString())));
-            }
-            const chunkSnaps = await Promise.all(chunkPromises);
-            let fullData = '';
-            chunkSnaps.forEach(snap => {
-              if (snap.exists()) {
-                fullData += snap.data().data;
-              }
-            });
-            setPreviewPhotoUri(fullData);
-          }
-        } else {
-          setPreviewPhotoUri(reg.photoUrl || '');
-        }
-      } catch (e) {
-        console.error("Error fetching photo", e);
-        setPreviewPhotoUri(reg.photoUrl || '');
-      }
-    } else {
-      setPreviewPhotoUri(reg.photoUrl || '');
-    }
+    const photoUri = await loadCipfFileDataUri(reg.photoFileId, reg.photoUrl || '');
+    setPreviewPhotoUri(photoUri);
     setIsPreviewLoading(false);
   };
 
-  const loadData = async () => {
-    setIsLoading(true);
-    await fetchRegistrations();
-    setIsLoading(false);
-  };
-
-  const isNearExpiry = (expiryDateStr: string, days: number = 60) => {
-    const [day, month, year] = expiryDateStr.split('/');
-    const expiry = new Date(Number(year), Number(month) - 1, Number(day));
-    const today = new Date();
-    const diffTime = Math.abs(expiry.getTime() - today.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-    return diffDays <= days;
-  };
-
-  const filteredRegistrations = registrations.filter(r => {
-    const matchesSearch = r.fullName.toLowerCase().includes(searchTerm.toLowerCase()) || r.cpf.includes(searchTerm);
-    const matchesFilter = filter === 'all' || (filter === 'expiring30' && isNearExpiry(r.expiryDate, 30));
-    return matchesSearch && matchesFilter;
-  });
-
-  const stats = {
-    total: registrations.length,
-    active: registrations.filter(r => r.status === 'active').length,
-    expiring30: registrations.filter(r => isNearExpiry(r.expiryDate, 30)).length
-  };
-
-  // Calculate stats for Bairro and Age
-  const bairroStats = registrations.reduce((acc, reg) => {
-    const bairro = reg.bairro || 'Não Informado';
-    acc[bairro] = (acc[bairro] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const ageStats = registrations.reduce((acc, reg) => {
-    const [day, month, year] = reg.birthDate.split('/');
-    const birthDate = new Date(Number(year), Number(month) - 1, Number(day));
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const m = today.getMonth() - birthDate.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
+  const handleEditClick = (reg: CIPFRegistration) => {
+    if (!canEditRegistration) {
+      alert('Seu perfil nao permite editar cadastros.');
+      return;
     }
-    
-    let group = '0-18';
-    if (age > 18 && age <= 30) group = '19-30';
-    else if (age > 30 && age <= 50) group = '31-50';
-    else if (age > 50 && age <= 65) group = '51-65';
-    else if (age > 65) group = '65+';
+    setEditReg(reg);
+    setEditForm(buildEditForm(reg));
+  };
 
-    acc[group] = (acc[group] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  const updateEditField = <K extends keyof EditRegistrationForm>(field: K, value: EditRegistrationForm[K]) => {
+    setEditForm((prev) => (prev ? { ...prev, [field]: value } : prev));
+  };
 
-  const handleViewMedicalDoc = async (reg: CIPFRegistration) => {
-    // Check for either the new ID-based system or the old URL-based system
-    const fileId = (reg as any).medicalReportFileId;
-    const fileUrl = reg.medicalReportUrl;
+  const handleSaveEdit = async () => {
+    if (!editReg || !editForm) return;
+    if (!canEditRegistration) {
+      alert('Seu perfil nao permite salvar alteracoes.');
+      return;
+    }
 
-    if (!fileId && !fileUrl) {
-      alert('Documento não encontrado.');
+    const fullName = normalizeUpper(editForm.fullName);
+    const bairro = normalizeUpper(editForm.bairro);
+    const cidade = normalizeUpper(editForm.cidade);
+    const estado = editForm.estado.trim().toUpperCase();
+    const cid = editForm.cid.trim().toUpperCase();
+    const cnsClean = toDigits(editForm.cns);
+
+    if (fullName.length < 3) {
+      alert('Informe um nome valido.');
+      return;
+    }
+    if (cnsClean && cnsClean.length !== 15) {
+      alert('Cartao SUS deve ter 15 digitos.');
+      return;
+    }
+    if (!editForm.birthDate || !editForm.issueDate || !editForm.expiryDate) {
+      alert('Data de nascimento, emissao e validade sao obrigatorias.');
       return;
     }
 
     try {
+      setIsSavingEdit(true);
+      // CPF stays locked because registration_index is the uniqueness key for
+      // the current non-cancelled workflow.
+      const payload = {
+        fullName,
+        cns: cnsClean || null,
+        phone: toDigits(editForm.phone),
+        birthDate: editForm.birthDate,
+        legalGuardian: editForm.legalGuardian ? normalizeUpper(editForm.legalGuardian) : null,
+        cep: toDigits(editForm.cep),
+        logradouro: normalizeUpper(editForm.logradouro),
+        bairro,
+        cidade,
+        estado,
+        cid,
+        justificativaCid: editForm.justificativaCid || null,
+        crm: editForm.crm.trim().toUpperCase(),
+        proofOfResidenceDate: editForm.proofOfResidenceDate || null,
+        medicalReportDate: editForm.medicalReportDate || null,
+        issueDate: editForm.issueDate,
+        expiryDate: editForm.expiryDate,
+        status: editForm.status
+      };
+
+      const { error: registrationError } = await supabase.from('registrations').update(payload).eq('id', editReg.id);
+      if (registrationError) throw registrationError;
+
+      const { error: publicError } = await supabase
+        .from('public_validations')
+        .update({
+          fullName,
+          issueDate: editForm.issueDate,
+          expiryDate: editForm.expiryDate,
+          status: editForm.status
+        })
+        .eq('id', editReg.id);
+      if (publicError) throw publicError;
+
+      const { error: indexError } = await supabase
+        .from('registration_index')
+        .update({ status: editForm.status, updated_at: new Date().toISOString() })
+        .eq('cpf', toDigits(editReg.cpf));
+      if (indexError) throw indexError;
+
+      await writeAudit(
+        'Edicao de Cadastro',
+        editReg.id,
+        `Campos principais atualizados para ${fullName}; status=${editForm.status}; cns=${cnsClean ? 'informado' : 'nao-informado'}`
+      );
+      setEditReg(null);
+      setEditForm(null);
+      await loadData();
+    } catch (error: any) {
+      console.error(error);
+      alert(error?.message || 'Erro ao salvar edicao.');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const loadData = async () => {
+    setIsLoading(true);
+    setLoadError('');
+    try {
+      await fetchRegistrations();
+    } catch (error: any) {
+      setLoadError(error?.message || 'Falha ao carregar dados do dashboard.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const cidOptions = useMemo(
+    () => ['all', ...Array.from(new Set(registrations.map((r) => r.cid).filter(Boolean) as string[])).sort()],
+    [registrations]
+  );
+
+  const bairroOptions = useMemo(
+    () => ['all', ...Array.from(new Set(registrations.map((r) => r.bairro).filter(Boolean) as string[])).sort()],
+    [registrations]
+  );
+
+  const filteredRegistrations = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return registrations.filter((reg) => {
+      const nameMatch = reg.fullName.toLowerCase().includes(term);
+      const cpfMatch = toDigits(reg.cpf).includes(toDigits(term));
+      const cnsMatch = toDigits(reg.cns || '').includes(toDigits(term));
+      const cidMatch = (reg.cid || '').toLowerCase().includes(term);
+      const bairroMatch = (reg.bairro || '').toLowerCase().includes(term);
+      const matchesSearch = !term || nameMatch || cpfMatch || cnsMatch || cidMatch || bairroMatch;
+      const matchesCid = cidFilter === 'all' || (reg.cid || '') === cidFilter;
+      const matchesBairro = bairroFilter === 'all' || (reg.bairro || '') === bairroFilter;
+      const matchesStatus = statusMatchesFilter(reg.status, statusFilter);
+      const matchesExpiry =
+        expiryFilter === 'all' || (normalizeRegistrationStatus(reg.status) === 'issued' && isExpiringInDays(reg.expiryDate, 30));
+      return matchesSearch && matchesCid && matchesBairro && matchesStatus && matchesExpiry;
+    });
+  }, [registrations, searchTerm, cidFilter, bairroFilter, statusFilter, expiryFilter]);
+
+  const stats = useMemo(
+    () => {
+      const byStatus = (status: RegistrationStatus) =>
+        registrations.filter((registration) => normalizeRegistrationStatus(registration.status) === status).length;
+      return {
+        total: registrations.length,
+        underReview: byStatus('under_review'),
+        approved: byStatus('approved'),
+        issued: byStatus('issued'),
+        expired: byStatus('expired'),
+        cancelled: byStatus('cancelled'),
+        expiring30: registrations.filter(
+          (registration) => normalizeRegistrationStatus(registration.status) === 'issued' && isExpiringInDays(registration.expiryDate, 30)
+        ).length,
+        filtered: filteredRegistrations.length
+      };
+    },
+    [registrations, filteredRegistrations]
+  );
+
+  const statCards = [
+    { label: 'Em analise', value: stats.underReview, icon: Clock, tone: 'bg-amber-50 text-amber-700' },
+    { label: 'Aprovadas', value: stats.approved, icon: CheckCircle, tone: 'bg-blue-50 text-blue-700' },
+    { label: 'Emitidas', value: stats.issued, icon: FileBadge2, tone: 'bg-[#eaf4ee] text-[#1f8a58]' },
+    { label: 'Vencendo 30d', value: stats.expiring30, icon: Clock, tone: 'bg-[#fff8dc] text-[#8a6500]' },
+    { label: 'Canceladas', value: stats.cancelled, icon: X, tone: 'bg-zinc-100 text-zinc-700' },
+    { label: 'Resultado filtrado', value: stats.filtered, icon: Filter, tone: 'bg-[#f3f6f9] text-[#17324d]' }
+  ];
+
+  const bairroStats = useMemo(
+    () =>
+      filteredRegistrations.reduce((acc, reg) => {
+        const bairro = reg.bairro || 'Nao Informado';
+        acc[bairro] = (acc[bairro] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>),
+    [filteredRegistrations]
+  );
+
+  const ageStats = useMemo(
+    () =>
+      filteredRegistrations.reduce((acc, reg) => {
+        const age = getAgeFromBRDate(reg.birthDate);
+        if (age === null) return acc;
+        const bucket = getAgeBucket(age);
+        acc[bucket] = (acc[bucket] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>),
+    [filteredRegistrations]
+  );
+
+  const handleViewMedicalDoc = async (reg: CIPFRegistration) => {
+    if (!canViewDocuments) {
+      alert('Seu perfil nao permite abrir documentos anexos.');
+      return;
+    }
+    const fileId = reg.medicalReportFileId;
+    const fileUrl = reg.medicalReportUrl;
+    if (!fileId && !fileUrl) {
+      alert('Documento nao encontrado.');
+      return;
+    }
+    try {
       setIsLoading(true);
-      let dataUri = fileUrl;
-
-      if (fileId) {
-        const docRef = doc(db, 'cipf_files', fileId);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const fileData = docSnap.data();
-          if (fileData.data) {
-            dataUri = fileData.data; // Legacy format
-          } else if (fileData.totalChunks) {
-            const chunkPromises = [];
-            for (let i = 0; i < fileData.totalChunks; i++) {
-              chunkPromises.push(getDoc(doc(db, 'cipf_files', fileId, 'chunks', i.toString())));
-            }
-            const chunkSnaps = await Promise.all(chunkPromises);
-            let fullData = '';
-            chunkSnaps.forEach(snap => {
-              if (snap.exists()) {
-                fullData += snap.data().data;
-              }
-            });
-            dataUri = fullData;
-          }
-        } else {
-          throw new Error('Arquivo não encontrado no banco de dados.');
-        }
-      }
-
-      if (dataUri) {
-        if (dataUri.startsWith('data:')) {
-          // Convert Base64 Data URI to Blob to bypass browser restrictions on opening data URIs directly
-          const arr = dataUri.split(',');
-          const mimeMatch = arr[0].match(/:(.*?);/);
-          const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
-          const bstr = atob(arr[1]);
-          let n = bstr.length;
-          const u8arr = new Uint8Array(n);
-          while (n--) {
-            u8arr[n] = bstr.charCodeAt(n);
-          }
-          const blob = new Blob([u8arr], { type: mime });
-          const blobUrl = URL.createObjectURL(blob);
-          
-          window.open(blobUrl, '_blank');
-        } else {
-          // It's a regular URL (e.g., Firebase Storage)
-          window.open(dataUri, '_blank');
-        }
-
-        // Log access
-        if (currentUser) {
-          await addDoc(collection(db, 'audit_logs'), {
-            registrationId: reg.id,
-            userId: currentUser.id,
-            userName: currentUser.name,
-            ip: 'client',
-            timestamp: new Date().toISOString(),
-            action: 'Visualização de Laudo Médico'
-          });
-        }
-      }
+      const dataUri = await loadCipfFileDataUri(fileId, fileUrl || '');
+      if (!dataUri) throw new Error('Arquivo nao encontrado no banco.');
+      openInNewTab(dataUri);
+      await writeAudit('Visualizacao de Laudo Medico', reg.id);
     } catch (error) {
       console.error(error);
       alert('Erro ao abrir o documento.');
@@ -203,26 +558,42 @@ export function Dashboard() {
     }
   };
 
-  const handleViewLogs = async (reg: CIPFRegistration) => {
+  const handleViewHistory = async (reg: CIPFRegistration) => {
+    if (!canViewHistory) {
+      alert('Seu perfil nao permite visualizar historico.');
+      return;
+    }
     try {
-      const q = query(collection(db, 'audit_logs'), where('registrationId', '==', reg.id));
-      const querySnapshot = await getDocs(q);
-      const logs: any[] = [];
-      querySnapshot.forEach((doc) => {
-        logs.push(doc.data());
-      });
-      // Sort by timestamp descending
-      logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      setViewLogs({ fullName: reg.fullName, logs });
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .eq('registrationId', reg.id)
+        .order('timestamp', { ascending: false });
+      if (error) throw error;
+      const emissionDate = parseBRDate(reg.issueDate);
+      const synthetic: TimelineEntry[] = emissionDate
+        ? [
+            {
+              action: normalizeRegistrationStatus(reg.status) === 'under_review' ? 'Cadastro recebido' : 'Registro inicial',
+              timestamp: emissionDate.toISOString(),
+              userName: 'Sistema',
+              reason: `Status atual: ${getStatusLabel(reg.status)}; validade registrada ate ${reg.expiryDate}`
+            }
+          ]
+        : [];
+      const entries = [...synthetic, ...((data || []) as TimelineEntry[])].sort(
+        (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+      setViewHistory({ fullName: reg.fullName, entries });
     } catch (error) {
       console.error(error);
-      alert('Acesso negado ou erro ao buscar logs.');
+      alert('Erro ao buscar historico.');
     }
   };
 
   const handleDeleteClick = (reg: CIPFRegistration) => {
-    if (currentUser?.role !== 'admin') {
-      alert('Acesso negado: Apenas administradores podem excluir registros.');
+    if (!canDeleteRegistration) {
+      alert('Apenas administradores podem excluir registros.');
       return;
     }
     setRegToDelete(reg);
@@ -230,49 +601,115 @@ export function Dashboard() {
   };
 
   const confirmDelete = async () => {
-    if (!regToDelete || deleteConfirmationText.trim().toUpperCase() !== regToDelete.fullName.trim().toUpperCase()) return;
+    if (!regToDelete) return;
+    if (deleteConfirmationText.trim().toUpperCase() !== regToDelete.fullName.trim().toUpperCase()) return;
     try {
-      if (currentUser) {
-        await addDoc(collection(db, 'audit_logs'), {
-          registrationId: regToDelete.id,
-          userId: currentUser.id,
-          userName: currentUser.name,
-          ip: 'client',
-          timestamp: new Date().toISOString(),
-          action: 'Exclusão de Registro',
-          reason: `Registro de ${regToDelete.fullName} excluído pelo administrador.`
-        });
-      }
-
-      await deleteDoc(doc(db, 'registrations', regToDelete.id));
+      await writeAudit('Exclusao de Registro', regToDelete.id, `Registro de ${regToDelete.fullName} excluido`);
+      await Promise.all([
+        supabase.from('registrations').delete().eq('id', regToDelete.id),
+        supabase.from('public_validations').delete().eq('id', regToDelete.id),
+        supabase.from('registration_index').delete().eq('cpf', regToDelete.cpf)
+      ]);
       setRegToDelete(null);
       setDeleteConfirmationText('');
-      loadData();
+      await loadData();
     } catch (error) {
       console.error(error);
       alert('Erro ao excluir registro.');
     }
   };
 
-  const handleExport = async () => {
-    try {
-      await useAppStore.getState().exportDatabase();
-    } catch (error) {
-      console.error(error);
-      alert('Erro ao exportar dados.');
+  const handleExportCsv = async () => {
+    if (!canExportDashboard) {
+      alert('Apenas administradores podem exportar relatorios.');
+      return;
     }
+    const rows = filteredRegistrations.map(normalizeForExport);
+    const headers = Object.keys(rows[0] || normalizeForExport({
+      id: '',
+      fullName: '',
+      cpf: '',
+      birthDate: '',
+      photoUrl: '',
+      issueDate: '',
+      expiryDate: '',
+      status: 'under_review'
+    } as CIPFRegistration));
+    const csv = [headers.join(';'), ...rows.map((r) => headers.map((h) => `"${String((r as any)[h] ?? '')}"`).join(';'))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dashboard_filtrado_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    await writeAudit('Exportacao CSV Dashboard');
+  };
+
+  const handleExportExcel = async () => {
+    if (!canExportDashboard) {
+      alert('Apenas administradores podem exportar relatorios.');
+      return;
+    }
+    const rows = filteredRegistrations.map(normalizeForExport);
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(wb, ws, 'Dashboard');
+    XLSX.writeFile(wb, `dashboard_filtrado_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    await writeAudit('Exportacao Excel Dashboard');
+  };
+
+  const handleExportPdf = async () => {
+    if (!canExportDashboard) {
+      alert('Apenas administradores podem exportar relatorios.');
+      return;
+    }
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const now = new Date();
+    doc.setFontSize(14);
+    doc.text('Relatorio Dashboard CIPF - Prefeitura de Ipero', 10, 12);
+    doc.setFontSize(10);
+    doc.text(`Gerado em: ${now.toLocaleString('pt-BR')}`, 10, 18);
+    const statusFilterLabel = statusFilter === 'all' ? 'Todos' : getStatusLabel(statusFilter);
+    doc.text(`Filtros: CID=${cidFilter} | Bairro=${bairroFilter} | Status=${statusFilterLabel} | Vencimento=${expiryFilter}`, 10, 24);
+    doc.text(`Total=${stats.total} | Analise=${stats.underReview} | Aprovadas=${stats.approved} | Emitidas=${stats.issued}`, 10, 30);
+    let y = 38;
+    doc.setFontSize(9);
+    doc.text('Nome', 10, y);
+    doc.text('CPF', 90, y);
+    doc.text('CID', 125, y);
+    doc.text('Bairro', 145, y);
+    doc.text('Status', 182, y);
+    y += 4;
+    filteredRegistrations.slice(0, 25).forEach((reg) => {
+      if (y > 280) return;
+      doc.text(reg.fullName.slice(0, 42), 10, y);
+      doc.text(maskCpf(reg.cpf), 90, y);
+      doc.text((reg.cid || '-').slice(0, 8), 125, y);
+      doc.text((reg.bairro || '-').slice(0, 18), 145, y);
+      doc.text(getStatusLabel(reg.status), 182, y);
+      y += 5;
+    });
+    doc.save(`dashboard_relatorio_${now.toISOString().slice(0, 10)}.pdf`);
+    await writeAudit('Exportacao PDF Dashboard');
   };
 
   const handleClearDatabase = async () => {
+    if (!canClearDatabase) {
+      alert('Apenas administradores podem limpar o banco de dados.');
+      return;
+    }
     if (clearDbConfirmation !== 'EXCLUIR TUDO') return;
-    
     try {
       setIsClearingDb(true);
       await useAppStore.getState().clearDatabase();
       setShowClearDbModal(false);
       setClearDbConfirmation('');
       alert('Banco de dados limpo com sucesso.');
-      loadData();
+      await writeAudit('Limpeza Completa Banco');
+      await loadData();
     } catch (error: any) {
       alert(error.message || 'Erro ao limpar banco de dados.');
     } finally {
@@ -280,356 +717,670 @@ export function Dashboard() {
     }
   };
 
+  const clearFilters = () => {
+    setSearchTerm('');
+    setCidFilter('all');
+    setBairroFilter('all');
+    setStatusFilter('all');
+    setExpiryFilter('all');
+  };
+
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h2 className="text-3xl font-semibold text-[#1D1D1F] tracking-tight">Gestão de Carteiras</h2>
-          <p className="text-[#86868B] mt-1">Acompanhe e gerencie as emissões da CIPF.</p>
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div className="institutional-hero overflow-hidden rounded-[1.5rem] p-5 text-white shadow-sm sm:p-7">
+        <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
+          <div>
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-black uppercase tracking-[0.2em] text-[#dce9f5]">
+              <FileBadge2 className="h-4 w-4 text-[#f2c94c]" />
+              Painel executivo da Secretaria
+            </div>
+            <h2 className="text-2xl font-black tracking-tight sm:text-3xl">Gestao de Carteiras CIPF</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#dce9f5]">
+              Acompanhamento institucional de emissoes, vencimentos, bairros atendidos e acoes administrativas.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm">
+            <p className="font-black uppercase tracking-wide">Prefeitura Municipal de Ipero</p>
+            <p className="text-xs text-[#dce9f5]">Secretaria Municipal de Saude</p>
+          </div>
         </div>
-        <div className="flex gap-3">
-          {currentUser?.role === 'admin' && (
+      </div>
+
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+        <div>
+          <h3 className="text-lg font-black text-[#17324d]">Acoes e filtros</h3>
+          <p className="mt-1 text-sm text-[#617184]">Use os botoes abaixo para atualizar, exportar ou auditar os dados filtrados.</p>
+        </div>
+        <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:w-auto">
+          {canClearDatabase && (
+            <Button
+              variant="outline"
+              onClick={() => setShowClearDbModal(true)}
+              className="h-12 border-red-100 text-red-600 hover:bg-red-50 hover:border-red-200"
+            >
+              <Trash2 className="w-4 h-4 mr-2" /> Limpar Banco
+            </Button>
+          )}
+          {canExportDashboard && (
             <>
-              <Button 
-                variant="outline" 
-                onClick={() => setShowClearDbModal(true)} 
-                className="rounded-xl h-11 px-4 border-red-100 text-red-600 hover:bg-red-50 hover:border-red-200 transition-all"
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Limpar Banco
+              <Button variant="outline" onClick={handleExportCsv} className="h-12">
+                <FileDown className="w-4 h-4 mr-2" /> CSV
               </Button>
-              <Button 
-                variant="outline" 
-                onClick={handleExport} 
-                className="rounded-xl h-11 px-4 border-gray-200 text-[#1D1D1F] hover:bg-gray-50 transition-all"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                Exportar Base
+              <Button variant="outline" onClick={handleExportExcel} className="h-12">
+                <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel
+              </Button>
+              <Button variant="outline" onClick={handleExportPdf} className="h-12">
+                <Download className="w-4 h-4 mr-2" /> PDF
               </Button>
             </>
           )}
-          <Button 
-            variant="outline" 
-            onClick={loadData} 
-            disabled={isLoading}
-            className="rounded-xl h-11 px-4 border-gray-200 text-[#1D1D1F] hover:bg-gray-50 transition-all"
-          >
-            <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-            Atualizar Dados
+          <Button variant="outline" onClick={loadData} disabled={isLoading} className="h-12">
+            <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} /> Atualizar
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/20 p-6 flex items-center gap-5 transition-transform hover:scale-[1.02] duration-300">
-          <div className="p-4 bg-blue-50 text-blue-600 rounded-2xl">
-            <Users className="w-6 h-6" />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-[#86868B]">Total Emitidas</p>
-            <p className="text-3xl font-semibold text-[#1D1D1F]">{stats.total}</p>
-          </div>
+      {loadError && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm">
+          Falha ao carregar dashboard: {loadError}
         </div>
-        
-        <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/20 p-6 flex items-center gap-5 transition-transform hover:scale-[1.02] duration-300">
-          <div className="p-4 bg-green-50 text-green-600 rounded-2xl">
-            <CheckCircle className="w-6 h-6" />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-[#86868B]">Ativas</p>
-            <p className="text-3xl font-semibold text-[#1D1D1F]">{stats.active}</p>
-          </div>
-        </div>
+      )}
 
-        <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/20 p-6 flex items-center gap-5 transition-transform hover:scale-[1.02] duration-300 cursor-pointer" onClick={() => setFilter(filter === 'expiring30' ? 'all' : 'expiring30')}>
-          <div className={`p-4 rounded-2xl ${filter === 'expiring30' ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-600'}`}>
-            <Clock className="w-6 h-6" />
+      <div className="institutional-panel rounded-[1.25rem] p-4 sm:p-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+          <div className="lg:col-span-2 relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#86868B]" />
+            <Input
+              placeholder="Nome, CPF, Cartao SUS, CID ou bairro..."
+              className="h-12 pl-9"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
           </div>
-          <div>
-            <p className="text-sm font-medium text-[#86868B]">Vencendo em 30 dias</p>
-            <p className="text-3xl font-semibold text-[#1D1D1F]">{stats.expiring30}</p>
-          </div>
+          <select
+            value={cidFilter}
+            onChange={(e) => setCidFilter(e.target.value)}
+            className="h-12 rounded-xl border border-[#d9e1ea] bg-white px-3"
+          >
+            {cidOptions.map((cid) => (
+              <option key={cid} value={cid}>
+                {cid === 'all' ? 'CID: Todos' : `CID: ${cid}`}
+              </option>
+            ))}
+          </select>
+          <select
+            value={bairroFilter}
+            onChange={(e) => setBairroFilter(e.target.value)}
+            className="h-12 rounded-xl border border-[#d9e1ea] bg-white px-3"
+          >
+            {bairroOptions.map((bairro) => (
+              <option key={bairro} value={bairro}>
+                {bairro === 'all' ? 'Bairro: Todos' : bairro}
+              </option>
+            ))}
+          </select>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            className="h-12 rounded-xl border border-[#d9e1ea] bg-white px-3"
+          >
+            <option value="all">Status: Todos</option>
+            {WORKFLOW_STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <select
+            value={expiryFilter}
+            onChange={(e) => setExpiryFilter(e.target.value as typeof expiryFilter)}
+            className="h-12 rounded-xl border border-[#d9e1ea] bg-white px-3"
+          >
+            <option value="all">Validade: Todas</option>
+            <option value="expiring30">Vencendo em 30 dias</option>
+          </select>
+          <Button type="button" variant="outline" onClick={clearFilters} className="h-12">
+            Limpar filtros
+          </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/20 p-6">
-          <h3 className="text-sm font-semibold text-[#86868B] uppercase tracking-wider mb-4">Emissões por Bairro</h3>
-          <div className="space-y-3 max-h-40 overflow-y-auto pr-2">
-            {Object.entries(bairroStats).sort((a, b) => b[1] - a[1]).map(([bairro, count]) => (
-              <div key={bairro} className="flex justify-between items-center">
-                <span className="text-sm text-[#1D1D1F] truncate pr-4">{bairro}</span>
-                <span className="text-sm font-medium bg-gray-100 px-2 py-1 rounded-lg">{count}</span>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        {statCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <div key={card.label} className="institutional-panel rounded-[1rem] p-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-xs font-black uppercase tracking-wide text-[#617184]">{card.label}</p>
+                <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${card.tone}`}>
+                  <Icon className="h-4 w-4" />
+                </div>
               </div>
-            ))}
+              <p className="text-3xl font-black text-[#17324d]">{card.value}</p>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="institutional-panel rounded-[1rem] p-4">
+          <h3 className="mb-3 text-xs font-black uppercase tracking-wide text-[#617184]">Emissoes por Bairro</h3>
+          <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+            {Object.entries(bairroStats)
+              .sort((a, b) => Number(b[1]) - Number(a[1]))
+              .map(([bairro, count]) => (
+                <div key={bairro} className="flex justify-between text-sm">
+                  <span className="truncate pr-3">{bairro}</span>
+                  <span className="rounded bg-[#eaf4ee] px-2 font-bold text-[#166534]">{count}</span>
+                </div>
+              ))}
             {Object.keys(bairroStats).length === 0 && <p className="text-sm text-gray-400">Sem dados</p>}
           </div>
         </div>
-        <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/20 p-6">
-          <h3 className="text-sm font-semibold text-[#86868B] uppercase tracking-wider mb-4">Faixa Etária</h3>
-          <div className="space-y-3 max-h-40 overflow-y-auto pr-2">
-            {Object.entries(ageStats).sort((a, b) => a[0].localeCompare(b[0])).map(([group, count]) => (
-              <div key={group} className="flex justify-between items-center">
-                <span className="text-sm text-[#1D1D1F]">{group} anos</span>
-                <span className="text-sm font-medium bg-gray-100 px-2 py-1 rounded-lg">{count}</span>
-              </div>
-            ))}
+        <div className="institutional-panel rounded-[1rem] p-4">
+          <h3 className="mb-3 text-xs font-black uppercase tracking-wide text-[#617184]">Faixa Etaria</h3>
+          <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+            {Object.entries(ageStats)
+              .sort((a, b) => a[0].localeCompare(b[0]))
+              .map(([group, count]) => (
+                <div key={group} className="flex justify-between text-sm">
+                  <span>{group} anos</span>
+                  <span className="rounded bg-[#eaf3fb] px-2 font-bold text-[#155c9c]">{count}</span>
+                </div>
+              ))}
             {Object.keys(ageStats).length === 0 && <p className="text-sm text-gray-400">Sem dados</p>}
           </div>
         </div>
       </div>
 
-      <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/20 overflow-hidden">
-        <div className="p-6 border-b border-gray-100/50 flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-3">
-            <h3 className="text-lg font-medium text-[#1D1D1F]">Registros</h3>
-            {filter === 'expiring30' && (
-              <span className="bg-amber-100 text-amber-800 text-xs px-2 py-1 rounded-full font-medium flex items-center gap-1">
-                <Clock className="w-3 h-3" /> Filtrando: Vencendo em 30 dias
-                <button onClick={() => setFilter('all')} className="ml-1 hover:text-amber-900"><Trash2 className="w-3 h-3" /></button>
-              </span>
-            )}
+      <div className="institutional-panel overflow-hidden rounded-[1.25rem]">
+        <div className="flex items-center justify-between gap-3 border-b border-[#e3e9ef] bg-[#f8fafc] p-4 text-sm text-[#617184]">
+          <div className="flex items-center gap-2">
+            <Filter className="h-4 w-4 text-[#155c9c]" /> Registros filtrados
           </div>
-          <div className="relative w-full sm:w-72">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#86868B]" />
-            <Input 
-              placeholder="Buscar por Nome ou CPF..." 
-              className="pl-9 bg-gray-50/50 border-gray-200 focus:bg-white transition-colors rounded-xl h-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
+          <span className="status-chip rounded-full px-3 py-1">{filteredRegistrations.length} registros</span>
         </div>
-        
-        <div className="overflow-x-auto">
-          {isLoading ? (
-            <div className="p-16 text-center flex flex-col items-center justify-center text-[#86868B]">
-              <Loader2 className="w-8 h-8 animate-spin text-blue-600 mb-4" />
-              <p className="text-lg font-medium text-[#1D1D1F]">Carregando registros...</p>
+
+        {isLoading ? (
+          <div className="p-12 text-center">
+            <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-600" />
+            <p className="text-[#86868B]">Carregando registros...</p>
+          </div>
+        ) : filteredRegistrations.length === 0 ? (
+          <div className="p-12 text-center text-[#86868B]">Nenhum registro encontrado para os filtros aplicados.</div>
+        ) : (
+          <>
+            <div className="md:hidden p-3 space-y-3">
+              {filteredRegistrations.map((reg) => (
+                <div key={reg.id} className={`rounded-2xl border border-[#d9e1ea] bg-[#fbfdff] p-3 ${getExpiryHighlight(reg)}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-medium text-sm">{reg.fullName}</p>
+                      <p className="text-xs text-[#86868B]">{maskCpf(reg.cpf)}</p>
+                      <p className="text-xs text-[#86868B]">CID: {reg.cid || '-'}</p>
+                    </div>
+                    <span className={`rounded-full border px-2 py-1 text-xs font-bold uppercase ${getStatusBadgeClass(reg.status)}`}>{getStatusLabel(reg.status)}</span>
+                  </div>
+                  <div className="text-xs text-[#86868B] mt-2">Bairro: {reg.bairro || '-'} | Validade: {reg.expiryDate}</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {canPrintCarteirinha && isPrintableStatus(reg.status) && (
+                      <Button variant="ghost" size="icon" onClick={() => handlePreviewCarteirinha(reg)} title="Carteirinha">
+                        <FileBadge2 className="w-4 h-4" />
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="icon" onClick={() => setDetailReg(reg)} title="Ver detalhes">
+                      <Eye className="w-4 h-4" />
+                    </Button>
+                    {canEditRegistration && (
+                      <Button variant="ghost" size="icon" onClick={() => handleEditClick(reg)} title="Editar">
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                    )}
+                    {canViewDocuments && (
+                      <Button variant="ghost" size="icon" onClick={() => handleViewMedicalDoc(reg)} title="Laudo">
+                        <FileText className="w-4 h-4" />
+                      </Button>
+                    )}
+                    {canViewHistory && (
+                      <Button variant="ghost" size="icon" onClick={() => handleViewHistory(reg)} title="Historico">
+                        <CalendarClock className="w-4 h-4" />
+                      </Button>
+                    )}
+                    {canDeleteRegistration && (
+                      <Button variant="ghost" size="icon" onClick={() => handleDeleteClick(reg)} title="Excluir">
+                        <Trash2 className="w-4 h-4 text-red-600" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
-          ) : filteredRegistrations.length === 0 ? (
-            <div className="p-16 text-center flex flex-col items-center justify-center text-[#86868B]">
-              <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center mb-4">
-                <Search className="w-8 h-8 text-gray-300" />
-              </div>
-              <p className="text-lg font-medium text-[#1D1D1F]">Nenhum registro encontrado</p>
-              <p className="text-sm mt-1">Tente ajustar os termos da sua busca.</p>
-            </div>
-          ) : (
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-[#86868B] uppercase bg-gray-50/30">
-                <tr>
-                  <th className="px-6 py-4 font-medium">Titular</th>
-                  <th className="px-6 py-4 font-medium">CPF</th>
-                  <th className="px-6 py-4 font-medium">Validade</th>
-                  <th className="px-6 py-4 font-medium">Status</th>
-                  <th className="px-6 py-4 font-medium text-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100/50">
-                {filteredRegistrations.map((reg) => (
-                  <tr key={reg.id} className="hover:bg-gray-50/50 transition-colors group">
-                    <td className="px-6 py-4 font-medium text-[#1D1D1F]">{reg.fullName}</td>
-                    <td className="px-6 py-4 text-[#86868B] font-mono text-xs">{reg.cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '***.$2.***-**')}</td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[#86868B]">{reg.expiryDate}</span>
-                        {isNearExpiry(reg.expiryDate) && (
-                          <AlertTriangle className="h-4 w-4 text-amber-500" title="Próximo do vencimento" />
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${
-                        reg.status === 'active' ? 'bg-green-50 text-green-700 border border-green-100' : 
-                        reg.status === 'expired' ? 'bg-red-50 text-red-700 border border-red-100' : 
-                        'bg-yellow-50 text-yellow-700 border border-yellow-100'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${
-                          reg.status === 'active' ? 'bg-green-500' : 
-                          reg.status === 'expired' ? 'bg-red-500' : 
-                          'bg-yellow-500'
-                        }`}></span>
-                        {reg.status === 'active' ? 'Ativo' : reg.status === 'expired' ? 'Expirado' : 'Pendente'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50" onClick={() => handlePreviewCarteirinha(reg)} title="Pré-visualizar Carteirinha">
-                          <FileBadge2 className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-blue-600 hover:text-blue-700 hover:bg-blue-50" onClick={() => handleViewMedicalDoc(reg)} title="Ver Laudo Médico">
-                          <FileText className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-gray-600 hover:text-gray-900 hover:bg-gray-100" onClick={() => handleViewLogs(reg)} title="Ver Histórico">
-                          <ShieldAlert className="h-4 w-4" />
-                        </Button>
-                        {currentUser?.role === 'admin' && (
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleDeleteClick(reg)} title="Excluir">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </div>
-                    </td>
+
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-[#f8fafc] text-xs uppercase text-[#617184]">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Titular</th>
+                    <th className="px-4 py-3 text-left">CPF</th>
+                    <th className="px-4 py-3 text-left">CID</th>
+                    <th className="px-4 py-3 text-left">Bairro</th>
+                    <th className="px-4 py-3 text-left">Validade</th>
+                    <th className="px-4 py-3 text-left">Status</th>
+                    <th className="px-4 py-3 text-right">Acoes</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredRegistrations.map((reg) => (
+                    <tr key={reg.id} className={`hover:bg-[#f8fafc] ${getExpiryHighlight(reg)}`}>
+                      <td className="px-4 py-3 font-medium">{reg.fullName}</td>
+                      <td className="px-4 py-3 text-[#86868B]">{maskCpf(reg.cpf)}</td>
+                      <td className="px-4 py-3">{reg.cid || '-'}</td>
+                      <td className="px-4 py-3">{reg.bairro || '-'}</td>
+                      <td className="px-4 py-3">{reg.expiryDate}</td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full border px-2 py-1 text-xs font-bold uppercase ${getStatusBadgeClass(reg.status)}`}>{getStatusLabel(reg.status)}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-1">
+                          {canPrintCarteirinha && isPrintableStatus(reg.status) && (
+                            <Button variant="ghost" size="icon" onClick={() => handlePreviewCarteirinha(reg)} title="Carteirinha">
+                              <FileBadge2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                          <Button variant="ghost" size="icon" onClick={() => setDetailReg(reg)} title="Ver detalhes">
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                          {canEditRegistration && (
+                            <Button variant="ghost" size="icon" onClick={() => handleEditClick(reg)} title="Editar cadastro">
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                          )}
+                          {canViewDocuments && (
+                            <Button variant="ghost" size="icon" onClick={() => handleViewMedicalDoc(reg)} title="Laudo">
+                              <FileText className="w-4 h-4" />
+                            </Button>
+                          )}
+                          {canViewHistory && (
+                            <Button variant="ghost" size="icon" onClick={() => handleViewHistory(reg)} title="Historico">
+                              <ShieldAlert className="w-4 h-4" />
+                            </Button>
+                          )}
+                          {canDeleteRegistration && (
+                            <Button variant="ghost" size="icon" onClick={() => handleDeleteClick(reg)} title="Excluir">
+                              <Trash2 className="w-4 h-4 text-red-600" />
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Modal de Logs */}
-      {viewLogs && (
-        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="w-full max-w-2xl bg-white/90 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-gray-100/50 flex justify-between items-center">
-              <div>
-                <h3 className="text-xl font-semibold text-[#1D1D1F]">Histórico de Auditoria</h3>
-                <p className="text-sm text-[#86868B] mt-1">{viewLogs.fullName}</p>
+      {detailReg && (
+        <ModalShell
+          open={Boolean(detailReg)}
+          onClose={() => setDetailReg(null)}
+          title="Ficha do Cadastro"
+          description={detailReg.fullName}
+          size="lg"
+        >
+            <div className="space-y-5">
+              <div className={`rounded-2xl border p-4 ${getExpiryHighlight(detailReg) || 'border-[#e3e9ef] bg-[#f8fafc]'}`}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-wide text-[#617184]">Status atual</p>
+                    <p className="mt-1 text-lg font-black text-[#17324d]">{getStatusLabel(detailReg.status)}</p>
+                  </div>
+                  <span className={`w-fit rounded-full border px-3 py-1 text-xs font-black uppercase ${getStatusBadgeClass(detailReg.status)}`}>
+                    Validade: {detailReg.expiryDate}
+                  </span>
+                </div>
               </div>
-              <Button variant="ghost" size="icon" onClick={() => setViewLogs(null)} className="rounded-full hover:bg-gray-100 text-gray-500">
-                <span className="sr-only">Fechar</span>
-                <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-4 w-4"><path d="M11.7816 4.03157C12.0062 3.80702 12.0062 3.44295 11.7816 3.2184C11.5571 2.99385 11.193 2.99385 10.9685 3.2184L7.50005 6.68682L4.03164 3.2184C3.80708 2.99385 3.44301 2.99385 3.21846 3.2184C2.99391 3.44295 2.99391 3.80702 3.21846 4.03157L6.68688 7.49999L3.21846 10.9684C2.99391 11.193 2.99391 11.557 3.21846 11.7816C3.44301 12.0061 3.80708 12.0061 4.03164 11.7816L7.50005 8.31316L10.9685 11.7816C11.193 12.0061 11.5571 12.0061 11.7816 11.7816C12.0062 11.557 12.0062 11.193 11.7816 10.9684L8.31322 7.49999L11.7816 4.03157Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"></path></svg>
-              </Button>
-            </div>
-            <div className="max-h-[60vh] overflow-y-auto p-2">
-              <div className="divide-y divide-gray-100/50">
-                {viewLogs.logs.map((log: any, idx: number) => (
-                  <div key={idx} className="p-4 hover:bg-gray-50/50 transition-colors rounded-2xl mx-2 my-1">
-                    <div className="flex justify-between items-start mb-1">
-                      <span className="font-medium text-[#1D1D1F]">{log.action}</span>
-                      <span className="text-xs text-[#86868B] font-mono">{new Date(log.timestamp).toLocaleString('pt-BR')}</span>
-                    </div>
-                    <div className="text-sm text-[#86868B] grid grid-cols-2 gap-2 mt-2">
-                      <div><span className="text-gray-400">Usuário:</span> {log.userName}</div>
-                      <div><span className="text-gray-400">IP:</span> <span className="font-mono text-xs">{log.ip}</span></div>
-                      {log.reason && <div className="col-span-2"><span className="text-gray-400">Motivo:</span> {log.reason}</div>}
-                    </div>
+              <div className="rounded-2xl border border-[#d9e1ea] bg-white p-4">
+                <div className="mb-3">
+                  <p className="text-sm font-black text-[#17324d]">Fluxo operacional</p>
+                  <p className="mt-1 text-sm text-[#617184]">
+                    Aprovacao, emissao, renovacao e cancelamento ficam registrados na auditoria.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {canApproveRegistration && canApproveStatus(detailReg.status) && (
+                    <Button type="button" onClick={() => handleApproveRegistration(detailReg)} className="h-10 bg-blue-600 text-white hover:bg-blue-700">
+                      Aprovar cadastro
+                    </Button>
+                  )}
+                  {canIssueRegistration && canPrintCarteirinha && canIssueStatus(detailReg.status) && (
+                    <Button type="button" onClick={() => handleIssueAndPrint(detailReg)} className="h-10 bg-green-700 text-white hover:bg-green-800">
+                      Emitir / imprimir
+                    </Button>
+                  )}
+                  {canRenewRegistration && canRenewStatus(detailReg.status) && (
+                    <Button type="button" variant="outline" onClick={() => handleRenewRegistration(detailReg)} className="h-10">
+                      Renovar
+                    </Button>
+                  )}
+                  {canReissueRegistration && canReissueStatus(detailReg.status) && (
+                    <Button type="button" variant="outline" onClick={() => handleReissueRegistration(detailReg)} className="h-10">
+                      Registrar 2 via
+                    </Button>
+                  )}
+                  {canCancelRegistration && canCancelStatus(detailReg.status) && (
+                    <Button type="button" variant="outline" onClick={() => handleCancelRegistration(detailReg)} className="h-10 border-red-200 text-red-700 hover:bg-red-50">
+                      Cancelar
+                    </Button>
+                  )}
+                  {!(canApproveRegistration && canApproveStatus(detailReg.status)) &&
+                    !(canIssueRegistration && canPrintCarteirinha && canIssueStatus(detailReg.status)) &&
+                    !(canRenewRegistration && canRenewStatus(detailReg.status)) &&
+                    !(canReissueRegistration && canReissueStatus(detailReg.status)) &&
+                    !(canCancelRegistration && canCancelStatus(detailReg.status)) && (
+                      <p className="text-sm text-[#617184]">Nenhuma acao operacional disponivel para este status.</p>
+                    )}
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {[
+                  ['CPF', maskCpf(detailReg.cpf)],
+                  ['Cartao SUS', detailReg.cns ? formatCNS(detailReg.cns) : 'Nao informado'],
+                  ['Nascimento', detailReg.birthDate],
+                  ['Telefone', detailReg.phone || '-'],
+                  ['Endereco', [detailReg.logradouro, detailReg.bairro, detailReg.cidade, detailReg.estado].filter(Boolean).join(', ') || '-'],
+                  ['CID', detailReg.cid || '-'],
+                  ['CRM', detailReg.crm || '-'],
+                  ['Responsavel legal', detailReg.legalGuardian || 'Nao informado'],
+                  ['Emissao', detailReg.issueDate],
+                  ['Assinatura visual', detailReg.visualSignature || '-']
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-xl border border-[#e3e9ef] bg-[#f8fafc] p-4">
+                    <p className="text-xs font-black uppercase tracking-wide text-[#617184]">{label}</p>
+                    <p className="mt-1 break-words font-semibold text-[#17324d]">{value}</p>
                   </div>
                 ))}
-                {viewLogs.logs.length === 0 && (
-                  <div className="p-12 text-center text-[#86868B]">
-                    Nenhum log registrado.
-                  </div>
-                )}
+              </div>
+              <div className="rounded-2xl border border-[#d9e1ea] bg-white p-4">
+                <p className="text-sm font-black text-[#17324d]">Auditoria visual</p>
+                <p className="mt-1 text-sm text-[#617184]">
+                  Use o historico para ver emissao inicial, edicoes, visualizacao de laudos, exclusoes e o responsavel por cada acao.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const reg = detailReg;
+                    setDetailReg(null);
+                    void handleViewHistory(reg);
+                  }}
+                  className="mt-3 h-10"
+                >
+                  <CalendarClock className="mr-2 h-4 w-4" />
+                  Abrir historico
+                </Button>
               </div>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
 
-      {/* Modal de Confirmação de Exclusão */}
-      {regToDelete && (
-        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-white/90 backdrop-blur-xl rounded-3xl shadow-2xl border border-white/20 overflow-hidden animate-in zoom-in-95 duration-200 p-6 md:p-8">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="p-3 bg-red-50 text-red-600 rounded-2xl">
-                <Trash2 className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-semibold text-[#1D1D1F]">Confirmar Exclusão</h3>
-            </div>
-            <p className="text-[#86868B] text-sm mb-6 leading-relaxed">
-              Esta ação não pode ser desfeita. Para excluir o registro de <strong className="text-[#1D1D1F]">{regToDelete.fullName}</strong>, digite o nome completo do titular abaixo.
-            </p>
-            <Input
-              value={deleteConfirmationText}
-              onChange={(e) => setDeleteConfirmationText(e.target.value)}
-              placeholder={regToDelete.fullName}
-              className="mb-8 rounded-xl bg-gray-50/50 border-gray-200 focus:bg-white transition-colors h-12"
-            />
-            <div className="flex justify-end gap-3">
-              <Button variant="ghost" onClick={() => setRegToDelete(null)} className="rounded-xl h-11 px-5 text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 font-medium">
-                Cancelar
-              </Button>
-              <Button 
-                onClick={confirmDelete} 
-                disabled={deleteConfirmationText.trim().toUpperCase() !== regToDelete.fullName.trim().toUpperCase()}
-                className="rounded-xl h-11 px-5 bg-red-600 hover:bg-red-700 text-white font-medium shadow-sm transition-all disabled:opacity-50 disabled:hover:bg-red-600"
-              >
-                Excluir Registro
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Confirmação de Limpeza do Banco */}
-      {showClearDbModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden animate-in zoom-in-95 duration-200 p-6 md:p-8">
-            <div className="flex items-center gap-4 mb-6">
-              <div className="p-3 bg-red-100 text-red-600 rounded-2xl">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-semibold text-[#1D1D1F]">Limpar Banco de Dados</h3>
-            </div>
-            <div className="bg-red-50 border border-red-100 rounded-2xl p-4 mb-6">
-              <p className="text-red-800 text-sm font-medium leading-relaxed">
-                ATENÇÃO: Esta ação é irreversível. Todos os cadastros e logs de auditoria serão excluídos permanentemente.
-              </p>
-            </div>
-            <p className="text-[#86868B] text-sm mb-4">
-              Para confirmar a exclusão total, digite <strong className="text-red-600">EXCLUIR TUDO</strong> abaixo:
-            </p>
-            <Input
-              value={clearDbConfirmation}
-              onChange={(e) => setClearDbConfirmation(e.target.value)}
-              placeholder="EXCLUIR TUDO"
-              className="mb-8 rounded-xl bg-gray-50 border-gray-200 focus:bg-white transition-colors h-12 font-bold text-center"
-            />
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Button 
-                variant="ghost" 
-                onClick={() => {
-                  setShowClearDbModal(false);
-                  setClearDbConfirmation('');
-                }} 
-                className="flex-1 rounded-xl h-12 text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 font-medium"
-                disabled={isClearingDb}
-              >
-                Cancelar
-              </Button>
-              <Button 
-                onClick={handleClearDatabase} 
-                disabled={clearDbConfirmation !== 'EXCLUIR TUDO' || isClearingDb}
-                className="flex-1 rounded-xl h-12 bg-red-600 hover:bg-red-700 text-white font-medium shadow-sm transition-all disabled:opacity-50"
-              >
-                {isClearingDb ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Limpando...
-                  </>
-                ) : (
-                  'Confirmar Exclusão Total'
-                )}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Pré-visualização da Carteirinha */}
-      {previewReg && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-[60] animate-in fade-in duration-200 overflow-y-auto">
-          <div className="bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden animate-in zoom-in-95 duration-200 max-w-4xl w-full my-8">
-            <div className="flex items-center justify-between p-6 border-b border-gray-100">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
-                  <FileBadge2 className="w-5 h-5" />
+      {viewHistory && (
+        <ModalShell
+          open={Boolean(viewHistory)}
+          onClose={() => setViewHistory(null)}
+          title="Linha do Tempo"
+          description={viewHistory.fullName}
+          size="lg"
+        >
+              {viewHistory.entries.length === 0 ? (
+                <p className="text-sm text-[#86868B] text-center py-8">Sem eventos registrados.</p>
+              ) : (
+                <div className="space-y-3">
+                  {viewHistory.entries.map((entry, idx) => (
+                    <div key={`${entry.timestamp}-${idx}`} className="rounded-xl border border-gray-100 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="font-medium text-sm">{entry.action}</p>
+                        <span className="text-xs text-[#86868B]">{new Date(entry.timestamp).toLocaleString('pt-BR')}</span>
+                      </div>
+                      <p className="text-xs text-[#86868B] mt-1">Responsavel: {entry.userName || 'Sistema'}</p>
+                      {entry.reason && <p className="text-xs text-[#86868B] mt-1">{entry.reason}</p>}
+                    </div>
+                  ))}
                 </div>
-                <h3 className="text-xl font-semibold text-[#1D1D1F]">Pré-visualização da Carteirinha</h3>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setPreviewReg(null)} className="rounded-full hover:bg-gray-100">
-                <X className="w-5 h-5 text-gray-500" />
+              )}
+        </ModalShell>
+      )}
+
+      {editReg && editForm && (
+        <ModalShell
+          open={Boolean(editReg && editForm)}
+          onClose={() => {
+            setEditReg(null);
+            setEditForm(null);
+          }}
+          title="Editar Cadastro"
+          description={`CPF ${maskCpf(editReg.cpf)} mantido bloqueado para preservar a unicidade do registro.`}
+          size="xl"
+          closeDisabled={isSavingEdit}
+          footer={
+            <div className="flex flex-col justify-end gap-2 sm:flex-row">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setEditReg(null);
+                  setEditForm(null);
+                }}
+                disabled={isSavingEdit}
+              >
+                Cancelar
+              </Button>
+              <Button className="bg-blue-600 hover:bg-blue-700 text-white" onClick={handleSaveEdit} disabled={isSavingEdit}>
+                {isSavingEdit ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                Salvar Alteracoes
               </Button>
             </div>
-            
-            <div className="p-6 bg-gray-50/50 flex justify-center min-h-[400px]">
+          }
+        >
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <label className="space-y-1 md:col-span-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Nome completo</span>
+                  <Input
+                    value={editForm.fullName}
+                    onChange={(e) => updateEditField('fullName', e.target.value)}
+                    className="h-11 uppercase"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Status</span>
+                  <select
+                    value={editForm.status}
+                    onChange={(e) => updateEditField('status', e.target.value as EditRegistrationForm['status'])}
+                    className="h-11 w-full rounded-xl border border-gray-200 px-3 bg-white"
+                  >
+                    {WORKFLOW_STATUS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Telefone</span>
+                  <Input value={editForm.phone} onChange={(e) => updateEditField('phone', e.target.value)} className="h-11" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Cartao SUS</span>
+                  <Input
+                    value={editForm.cns}
+                    onChange={(e) => updateEditField('cns', formatCNS(e.target.value))}
+                    placeholder="000 0000 0000 0000"
+                    maxLength={18}
+                    className="h-11"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Nascimento</span>
+                  <Input value={editForm.birthDate} onChange={(e) => updateEditField('birthDate', e.target.value)} className="h-11" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Responsavel legal</span>
+                  <Input
+                    value={editForm.legalGuardian}
+                    onChange={(e) => updateEditField('legalGuardian', e.target.value)}
+                    className="h-11 uppercase"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+                <label className="space-y-1 md:col-span-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">CEP</span>
+                  <Input value={editForm.cep} onChange={(e) => updateEditField('cep', e.target.value)} className="h-11" />
+                </label>
+                <label className="space-y-1 md:col-span-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Logradouro</span>
+                  <Input
+                    value={editForm.logradouro}
+                    onChange={(e) => updateEditField('logradouro', e.target.value)}
+                    className="h-11 uppercase"
+                  />
+                </label>
+                <label className="space-y-1 md:col-span-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Bairro</span>
+                  <Input value={editForm.bairro} onChange={(e) => updateEditField('bairro', e.target.value)} className="h-11 uppercase" />
+                </label>
+                <label className="space-y-1 md:col-span-3">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Cidade</span>
+                  <Input value={editForm.cidade} onChange={(e) => updateEditField('cidade', e.target.value)} className="h-11 uppercase" />
+                </label>
+                <label className="space-y-1 md:col-span-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">UF</span>
+                  <Input
+                    value={editForm.estado}
+                    onChange={(e) => updateEditField('estado', e.target.value)}
+                    maxLength={2}
+                    className="h-11 uppercase"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">CID</span>
+                  <Input value={editForm.cid} onChange={(e) => updateEditField('cid', e.target.value)} className="h-11 uppercase" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">CRM</span>
+                  <Input value={editForm.crm} onChange={(e) => updateEditField('crm', e.target.value)} className="h-11 uppercase" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Data laudo</span>
+                  <Input
+                    value={editForm.medicalReportDate}
+                    onChange={(e) => updateEditField('medicalReportDate', e.target.value)}
+                    className="h-11"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Data comprovante</span>
+                  <Input
+                    value={editForm.proofOfResidenceDate}
+                    onChange={(e) => updateEditField('proofOfResidenceDate', e.target.value)}
+                    className="h-11"
+                  />
+                </label>
+                <label className="space-y-1 md:col-span-4">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Justificativa CID</span>
+                  <Input
+                    value={editForm.justificativaCid}
+                    onChange={(e) => updateEditField('justificativaCid', e.target.value)}
+                    className="h-11"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Emissao</span>
+                  <Input value={editForm.issueDate} onChange={(e) => updateEditField('issueDate', e.target.value)} className="h-11" />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-[#86868B]">Validade</span>
+                  <Input value={editForm.expiryDate} onChange={(e) => updateEditField('expiryDate', e.target.value)} className="h-11" />
+                </label>
+              </div>
+            </div>
+        </ModalShell>
+      )}
+
+      {regToDelete && (
+        <ModalShell
+          open={Boolean(regToDelete)}
+          onClose={() => setRegToDelete(null)}
+          title="Confirmar Exclusao"
+          description={`Para excluir ${regToDelete.fullName}, digite o nome completo abaixo.`}
+          size="md"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setRegToDelete(null)}>Cancelar</Button>
+              <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={confirmDelete}>Excluir</Button>
+            </div>
+          }
+        >
+          <Input value={deleteConfirmationText} onChange={(e) => setDeleteConfirmationText(e.target.value)} placeholder={regToDelete.fullName} className="h-12" />
+        </ModalShell>
+      )}
+
+      {showClearDbModal && (
+        <ModalShell
+          open={showClearDbModal}
+          onClose={() => setShowClearDbModal(false)}
+          title="Limpar Banco"
+          description="Esta acao e irreversivel. Digite EXCLUIR TUDO para confirmar."
+          size="md"
+          closeDisabled={isClearingDb}
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setShowClearDbModal(false)} disabled={isClearingDb}>Cancelar</Button>
+              <Button
+                className="bg-red-600 hover:bg-red-700 text-white"
+                onClick={handleClearDatabase}
+                disabled={clearDbConfirmation !== 'EXCLUIR TUDO' || isClearingDb}
+              >
+                {isClearingDb ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirmar'}
+              </Button>
+            </div>
+          }
+        >
+          <Input value={clearDbConfirmation} onChange={(e) => setClearDbConfirmation(e.target.value)} placeholder="EXCLUIR TUDO" className="h-12 text-center font-semibold" />
+        </ModalShell>
+      )}
+
+      {previewReg && (
+        <ModalShell
+          open={Boolean(previewReg)}
+          onClose={() => setPreviewReg(null)}
+          title="Pre-visualizacao da Carteirinha"
+          size="xl"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setPreviewReg(null)}>Fechar</Button>
+              <Button
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                onClick={() => handleIssueAndPrint(previewReg)}
+              >
+                Emitir / ir para Impressao
+              </Button>
+            </div>
+          }
+        >
+            <div className="flex min-h-[460px] justify-center overflow-x-auto rounded-xl bg-gray-50/50 px-3 py-8 sm:px-6">
               {isPreviewLoading ? (
                 <div className="flex flex-col items-center justify-center text-[#86868B]">
-                  <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-4" />
-                  <p className="font-medium">Carregando foto e dados...</p>
+                  <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-3" />
+                  <p>Carregando foto e dados...</p>
                 </div>
               ) : (
                 <div className="scale-[0.85] sm:scale-100 origin-top">
@@ -637,24 +1388,7 @@ export function Dashboard() {
                 </div>
               )}
             </div>
-            
-            <div className="p-6 border-t border-gray-100 flex justify-end gap-3 bg-white">
-              <Button variant="ghost" onClick={() => setPreviewReg(null)} className="rounded-xl h-11 px-5 text-[#86868B] hover:text-[#1D1D1F] hover:bg-gray-100 font-medium">
-                Fechar
-              </Button>
-              <Button 
-                onClick={() => {
-                  setPreviewReg(null);
-                  window.history.pushState({}, '', `/carteirinha?search=${previewReg.cpf}`);
-                  useAppStore.getState().setActiveTab('carteirinha');
-                }} 
-                className="rounded-xl h-11 px-5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-sm transition-all"
-              >
-                Ir para Impressão
-              </Button>
-            </div>
-          </div>
-        </div>
+        </ModalShell>
       )}
     </div>
   );

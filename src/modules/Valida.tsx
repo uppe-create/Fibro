@@ -1,46 +1,106 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { CheckCircle2, XCircle, AlertTriangle, Fingerprint, ChevronRight, Upload, Image as ImageIcon, FileText } from 'lucide-react';
-import { db } from '../firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  AlertTriangle,
+  BadgeCheck,
+  CalendarDays,
+  CheckCircle2,
+  Fingerprint,
+  Loader2,
+  ShieldCheck,
+  Upload,
+  XCircle
+} from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { daysUntil } from '@/lib/date';
+import { getStatusLabel, isPubliclyValidStatus } from '@/lib/registration-status';
 import { Html5Qrcode } from 'html5-qrcode';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
+import prefeituraLogo from '@/assets/prefeitura-logo.png';
 
-// Setup PDF.js worker locally using Vite's ?url import
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
+// Public QR Code validation screen. Keep this privacy-preserving: do not query
+// registrations/documents here, only public_validations or validate_cipf.
+type ValidationStatus = 'idle' | 'loading' | 'valid' | 'invalid' | 'error';
+
+type PublicValidationData = {
+  id: string;
+  fullName: string;
+  cpfMasked: string;
+  issueDate: string;
+  expiryDate: string;
+  status: 'active' | 'expired' | 'pending' | string;
+  visualSignature?: string;
+  checksum?: string;
+};
+
+function getValiditySummary(data: PublicValidationData | null) {
+  if (!data?.expiryDate) return 'Validade nao informada.';
+  const days = daysUntil(data.expiryDate);
+  if (days === null) return 'Validade em formato invalido.';
+  if (days < 0) return `Venceu ha ${Math.abs(days)} dia(s).`;
+  if (days === 0) return 'Vence hoje.';
+  return `Valida por mais ${days} dia(s).`;
+}
+
+async function fetchPublicValidation(cleanId: string, cleanSig: string) {
+  // Production path: this RPC only returns data when id + signature match.
+  const { data: rpcData, error: rpcError } = await supabase
+    .rpc('validate_cipf', { p_id: cleanId, p_sig: cleanSig })
+    .maybeSingle();
+
+  if (!rpcError) {
+    return { data: rpcData as PublicValidationData | null, signatureCheckedByDb: true };
+  }
+
+  // Compatibility path while the production hardening SQL has not been applied.
+  if (!['PGRST202', '42883'].includes((rpcError as any)?.code)) {
+    console.warn('Falha no RPC validate_cipf, usando fallback temporario:', rpcError.message);
+  }
+
+  const { data: tableData, error: tableError } = await supabase
+    .from('public_validations')
+    .select('id,fullName,cpfMasked,issueDate,expiryDate,status,visualSignature,checksum')
+    .eq('id', cleanId)
+    .maybeSingle();
+
+  if (tableError) throw tableError;
+  return { data: tableData as PublicValidationData | null, signatureCheckedByDb: false };
+}
+
 export function Valida() {
-  const [status, setStatus] = useState<'idle' | 'loading' | 'valid' | 'invalid' | 'error'>('idle');
-  const [data, setData] = useState<any>(null);
+  const [status, setStatus] = useState<ValidationStatus>('idle');
+  const [data, setData] = useState<PublicValidationData | null>(null);
+  const [invalidReason, setInvalidReason] = useState('');
   const [manualId, setManualId] = useState('');
   const [manualSig, setManualSig] = useState('');
   const [showManual, setShowManual] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [consultedAt, setConsultedAt] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const checkRateLimit = () => {
+    // Client-side throttle is UX protection, not hard security. Add backend
+    // rate limiting before heavy public use.
     const now = Date.now();
     const attemptsStr = localStorage.getItem('validationAttempts');
-    let attempts = attemptsStr ? JSON.parse(attemptsStr) : [];
-    
-    attempts = attempts.filter((time: number) => now - time < 60000);
-    
-    if (attempts.length >= 5) {
-      return false;
+    let attempts: number[] = [];
+
+    try {
+      attempts = attemptsStr ? JSON.parse(attemptsStr) : [];
+    } catch {
+      attempts = [];
     }
-    
+
+    attempts = attempts.filter((time) => now - time < 60000);
+    if (attempts.length >= 5) return false;
+
     attempts.push(now);
     localStorage.setItem('validationAttempts', JSON.stringify(attempts));
     return true;
-  };
-
-  const generateChecksum = async (data: string) => {
-    const msgBuffer = new TextEncoder().encode(data);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   };
 
   const validate = async (id: string, sig: string) => {
@@ -53,45 +113,52 @@ export function Valida() {
     const cleanSig = sig.trim().toUpperCase();
 
     setStatus('loading');
+    setInvalidReason('');
+    setData(null);
+    setConsultedAt('');
 
     if (!checkRateLimit()) {
-      alert('Limite de consultas excedido. Tente novamente em 1 minuto.');
+      setInvalidReason('Limite de consultas excedido. Tente novamente em 1 minuto.');
       setStatus('error');
       return;
     }
 
     try {
-      const docRef = doc(db, 'registrations', cleanId);
-      const docSnap = await getDoc(docRef);
+      const result = await fetchPublicValidation(cleanId, cleanSig);
+      const validationData = result.data;
+      setConsultedAt(new Date().toLocaleString('pt-BR'));
 
-      if (docSnap.exists()) {
-        const regData = docSnap.data();
-        
-        // Normalize data for checksum comparison
-        const cpf = (regData.cpf || '').replace(/\D/g, '');
-        const fullName = (regData.fullName || '').toUpperCase().trim();
-        const birthDate = (regData.birthDate || '').trim();
-        const issueDate = (regData.issueDate || '').trim();
-        const visualSignature = (regData.visualSignature || '').toUpperCase().trim();
-
-        const dataToHash = `${cpf}${fullName}${birthDate}${issueDate}${visualSignature}`;
-        const calculatedChecksum = await generateChecksum(dataToHash);
-
-        const isSigValid = visualSignature === cleanSig;
-        const isActive = regData.status === 'active';
-        const isChecksumValid = calculatedChecksum === regData.checksum;
-
-        if (isSigValid && isActive && isChecksumValid) {
-          setStatus('valid');
-          setData(regData);
-        } else {
-          setStatus('invalid');
-        }
-      } else {
+      if (!validationData) {
+        setInvalidReason('Registro nao encontrado ou assinatura digital invalida.');
         setStatus('invalid');
+        return;
       }
+
+      const isSigValid =
+        result.signatureCheckedByDb ||
+        String(validationData.visualSignature || '').trim().toUpperCase() === cleanSig;
+
+      if (!isSigValid) {
+        setInvalidReason('A assinatura digital nao confere com os registros oficiais.');
+        setStatus('invalid');
+        return;
+      }
+
+      const days = daysUntil(validationData.expiryDate);
+      const isExpiredByDate = days !== null && days < 0;
+      const isActive = isPubliclyValidStatus(validationData.status);
+
+      setData(validationData);
+      if (isActive && !isExpiredByDate) {
+        setStatus('valid');
+        return;
+      }
+
+      setInvalidReason(isExpiredByDate ? 'Documento expirado por validade vencida.' : 'Documento ainda nao foi emitido ou nao esta ativo no sistema.');
+      setStatus('invalid');
     } catch (error) {
       console.error('Validation error:', error);
+      setInvalidReason('Nao foi possivel comunicar com o servidor de validacao.');
       setStatus('error');
     }
   };
@@ -109,357 +176,324 @@ export function Valida() {
   useEffect(() => {
     switch (status) {
       case 'valid':
-        document.title = 'Válida - CIPF';
+        document.title = 'CIPF valida';
         break;
       case 'invalid':
-        document.title = 'Inválida - CIPF';
+        document.title = 'CIPF invalida';
         break;
       case 'loading':
-        document.title = 'Validando...';
+        document.title = 'Validando CIPF...';
         break;
       case 'error':
-        document.title = 'Erro na Validação';
+        document.title = 'Erro na validacao';
         break;
       default:
-        document.title = 'Validação Oficial - CIPF';
+        document.title = 'Validacao publica da CIPF';
     }
   }, [status]);
 
-  const handleManualValidation = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleManualValidation = (event: React.FormEvent) => {
+    event.preventDefault();
     validate(manualId, manualSig);
   };
 
   const extractImageFromPdf = async (file: File): Promise<File | null> => {
+    // QR scanner accepts images. For PDF uploads we rasterize page 1 and scan it.
     try {
       const arrayBuffer = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      
-      // Get the first page
       const page = await pdf.getPage(1);
-      
-      // Set scale to get a high-quality render for the QR code reader
-      const scale = 2.0;
-      const viewport = page.getViewport({ scale });
-      
+      const viewport = page.getViewport({ scale: 2 });
       const canvas = document.createElement('canvas');
       const context = canvas.getContext('2d');
       if (!context) return null;
-      
+
       canvas.height = viewport.height;
       canvas.width = viewport.width;
-      
+
       await page.render({
+        canvas,
         canvasContext: context,
-        viewport: viewport
+        viewport
       }).promise;
-      
+
       return new Promise((resolve) => {
         canvas.toBlob((blob) => {
-          if (blob) {
-            resolve(new File([blob], "pdf-page.png", { type: "image/png" }));
-          } else {
-            resolve(null);
-          }
+          resolve(blob ? new File([blob], 'pdf-page.png', { type: 'image/png' }) : null);
         }, 'image/png');
       });
     } catch (error) {
-      console.error("Error extracting image from PDF:", error);
+      console.error('Error extracting image from PDF:', error);
       return null;
     }
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement> | React.DragEvent<HTMLDivElement>, droppedFile?: File) => {
-    let file: File | undefined;
-    
-    if (droppedFile) {
-      file = droppedFile;
-    } else if (event && 'target' in event && (event.target as HTMLInputElement).files) {
-      file = (event.target as HTMLInputElement).files?.[0];
-    }
-    
+    const file = droppedFile || ('target' in event ? (event.target as HTMLInputElement).files?.[0] : undefined);
     if (!file) return;
 
     setStatus('loading');
+    setInvalidReason('');
+
     try {
       let fileToScan = file;
-      
+
       if (file.type === 'application/pdf') {
         const extractedImage = await extractImageFromPdf(file);
-        if (extractedImage) {
-          fileToScan = extractedImage;
-        } else {
-          throw new Error("Não foi possível processar o PDF.");
-        }
+        if (!extractedImage) throw new Error('Nao foi possivel processar o PDF.');
+        fileToScan = extractedImage;
       }
 
-      const html5QrCode = new Html5Qrcode("qr-reader-hidden");
+      const html5QrCode = new Html5Qrcode('qr-reader-hidden');
       const decodedText = await html5QrCode.scanFile(fileToScan, true);
-      
-      try {
-        const url = new URL(decodedText);
-        const id = url.searchParams.get('id');
-        const sig = url.searchParams.get('sig');
-        
-        if (id && sig) {
-          setManualId(id);
-          setManualSig(sig);
-          validate(id, sig);
-        } else {
-          alert('QR Code inválido. Não foi possível extrair os dados da carteirinha.');
-          setStatus('idle');
-        }
-      } catch (e) {
-        alert('QR Code inválido. Formato não reconhecido.');
-        setStatus('idle');
+      const url = new URL(decodedText);
+      const id = url.searchParams.get('id');
+      const sig = url.searchParams.get('sig');
+
+      if (!id || !sig) {
+        setInvalidReason('QR Code invalido. Nao foi possivel extrair os dados da carteirinha.');
+        setStatus('invalid');
+        return;
       }
-    } catch (err) {
-      console.error("Error scanning file", err);
-      alert("Não foi possível ler o QR Code no arquivo. Tente enviar um arquivo com melhor qualidade ou mais nítido.");
-      setStatus('idle');
-    }
-    
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+
+      setManualId(id);
+      setManualSig(sig);
+      await validate(id, sig);
+    } catch (error) {
+      console.error('Error scanning file', error);
+      setInvalidReason('Nao foi possivel ler o QR Code. Tente enviar uma imagem mais nitida.');
+      setStatus('error');
+    } finally {
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
+  const handleDragOver = (event: React.DragEvent) => {
+    event.preventDefault();
     setIsDragging(true);
   };
 
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
+  const handleDragLeave = (event: React.DragEvent) => {
+    event.preventDefault();
     setIsDragging(false);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
+    const file = event.dataTransfer.files?.[0];
     if (file) {
-      handleFileUpload(e as any, file);
+      handleFileUpload(event, file);
     }
   };
 
   const resetValidation = () => {
     setStatus('idle');
     setData(null);
+    setInvalidReason('');
     setManualId('');
     setManualSig('');
     setShowManual(false);
+    setConsultedAt('');
     window.history.replaceState({}, document.title, window.location.pathname);
   };
 
+  const isValid = status === 'valid';
+
   return (
-    <div className="min-h-[80vh] flex flex-col items-center justify-center py-12 px-4 animate-in fade-in duration-500">
-      <div id="qr-reader-hidden" style={{ display: 'none' }}></div>
-      
-      <div className="w-full max-w-md bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/20 overflow-hidden relative">
-        
-        <div className="p-8">
-          
-          {/* Header */}
-          <div className="text-center mb-8">
-            <div className="w-16 h-16 bg-blue-600/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <FileText className="w-8 h-8 text-blue-600" />
+    <div className="min-h-[80vh] px-4 py-8 animate-in fade-in duration-500">
+      <div id="qr-reader-hidden" className="hidden" />
+
+      <div className="mx-auto flex w-full max-w-4xl flex-col items-center">
+        <section className="w-full overflow-hidden border border-[#d9e1ea] bg-white shadow-[0_18px_55px_rgba(23,50,77,0.08)]">
+          <div className="h-1.5 bg-[linear-gradient(90deg,#155c9c_0%,#155c9c_42%,#1f8a58_42%,#1f8a58_78%,#f2c94c_78%,#f2c94c_100%)]" />
+
+          <div className="px-5 py-8 text-center sm:px-10 sm:py-10">
+            <div className="mx-auto mb-6 flex h-16 w-40 items-center justify-center bg-white px-3">
+              <img src={prefeituraLogo} alt="Prefeitura de Ipero" className="max-h-12 w-auto object-contain" />
             </div>
-            <h2 className="text-2xl font-semibold text-[#1D1D1F] tracking-tight">Validação Oficial</h2>
-            <p className="text-[#86868B] mt-1">Verifique a autenticidade da CIPF</p>
+
+            <div className="mb-4 inline-flex items-center gap-2 border border-[#d9e1ea] bg-[#f8fafc] px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-[#526579]">
+              <ShieldCheck className="h-3.5 w-3.5 text-[#1f8a58]" />
+              Consulta oficial
+            </div>
+
+            <h2 className="mx-auto max-w-2xl text-3xl font-black leading-tight text-[#17324d] sm:text-4xl">
+              Validar Carteirinha de Fibromialgia
+            </h2>
+            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#617184]">
+              Confira se a CIPF apresentada foi emitida pela Prefeitura de Ipero e se ainda esta valida.
+            </p>
           </div>
 
-          {/* IDLE STATE */}
-          {status === 'idle' && (
-            <div className="space-y-6 animate-in zoom-in-95 duration-300">
-              
-              <div 
-                className={`relative border-2 border-dashed rounded-2xl p-8 text-center transition-all duration-200 cursor-pointer ${
-                  isDragging 
-                    ? 'border-blue-500 bg-blue-50/50 scale-[1.02]' 
-                    : 'border-gray-200 hover:border-blue-400 hover:bg-gray-50/50'
-                }`}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input 
-                  type="file" 
-                  accept="image/*,application/pdf" 
-                  className="hidden" 
-                  ref={fileInputRef}
-                  onChange={handleFileUpload}
-                />
-                <div className="w-14 h-14 bg-white rounded-full shadow-sm border border-gray-100 flex items-center justify-center mx-auto mb-4">
-                  <Upload className={`w-6 h-6 ${isDragging ? 'text-blue-600' : 'text-[#86868B]'}`} />
+          <div className="border-t border-[#e3e9ef] bg-[#f8fafc] px-5 py-6 sm:px-10">
+            {status === 'idle' && (
+              <div className="mx-auto max-w-xl space-y-4 animate-in zoom-in-95 duration-300">
+                <div
+                  className={`cursor-pointer border-2 border-dashed bg-white p-5 text-center transition-all duration-200 ${
+                    isDragging ? 'border-[#155c9c] bg-blue-50' : 'border-[#d8e2ec] hover:border-[#155c9c]'
+                  }`}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <input type="file" accept="image/*,application/pdf" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center bg-[#eef4f8]">
+                    <Upload className={`h-6 w-6 ${isDragging ? 'text-[#155c9c]' : 'text-[#617184]'}`} />
+                  </div>
+                  <h3 className="text-base font-black text-[#17324d]">Enviar QR Code da carteirinha</h3>
+                  <p className="mt-1 text-sm text-[#617184]">Aceita imagem ou PDF.</p>
+                  <Button className="pointer-events-none mt-4 h-11 w-full rounded-xl bg-[#17324d] text-white hover:bg-[#10263b]">
+                    Selecionar arquivo
+                  </Button>
                 </div>
-                <h3 className="text-base font-medium text-[#1D1D1F] mb-1">
-                  Envie o arquivo da carteirinha
-                </h3>
-                <p className="text-sm text-[#86868B] mb-6">
-                  Arraste e solte ou clique para selecionar
-                </p>
-                <Button 
-                  className="w-full rounded-xl h-12 bg-gray-900 hover:bg-gray-800 text-white font-medium shadow-sm transition-all active:scale-[0.98] pointer-events-none"
-                >
-                  Selecionar Arquivo
-                </Button>
-              </div>
 
-              <div className="relative flex items-center py-2">
-                <div className="flex-grow border-t border-gray-100"></div>
-                <span className="flex-shrink-0 mx-4 text-xs font-medium text-[#86868B] uppercase tracking-widest">ou</span>
-                <div className="flex-grow border-t border-gray-100"></div>
+                {!showManual ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowManual(true)}
+                    className="flex w-full items-center justify-center gap-2 border border-[#d9e1ea] bg-white p-4 text-[#17324d] hover:bg-[#f8fbfd]"
+                  >
+                    <Fingerprint className="h-4 w-4 text-[#155c9c]" />
+                    <span className="font-black">Digitar codigo manualmente</span>
+                  </button>
+                ) : (
+                  <form onSubmit={handleManualValidation} className="space-y-4 border border-[#e3e9ef] bg-white p-5 text-left">
+                    <label className="block space-y-1.5">
+                      <span className="ml-1 text-xs font-bold uppercase tracking-wide text-[#617184]">Registro CIPF</span>
+                      <Input placeholder="ID impresso no QR Code" value={manualId} onChange={(event) => setManualId(event.target.value)} className="h-12 rounded-xl bg-white" required />
+                    </label>
+                    <label className="block space-y-1.5">
+                      <span className="ml-1 text-xs font-bold uppercase tracking-wide text-[#617184]">Assinatura digital</span>
+                      <Input placeholder="Ex: ABC123" value={manualSig} onChange={(event) => setManualSig(event.target.value)} className="h-12 rounded-xl bg-white font-mono uppercase" required />
+                    </label>
+                    <div className="flex gap-3 pt-1">
+                      <Button type="button" variant="ghost" onClick={() => setShowManual(false)} className="h-12 flex-1 rounded-xl">
+                        Cancelar
+                      </Button>
+                      <Button type="submit" className="h-12 flex-1 rounded-xl bg-[#17324d] text-white hover:bg-[#10263b]">
+                        Validar
+                      </Button>
+                    </div>
+                  </form>
+                )}
               </div>
+            )}
 
-              {!showManual ? (
-                <Button 
-                  variant="ghost"
-                  onClick={() => setShowManual(true)}
-                  className="w-full h-12 rounded-xl text-[#86868B] font-medium hover:bg-gray-100/50 transition-all flex items-center justify-center gap-2"
-                >
-                  <Fingerprint className="w-4 h-4" />
-                  Digitar código manualmente
-                </Button>
-              ) : (
-                <form onSubmit={handleManualValidation} className="space-y-4 animate-in slide-in-from-top-4 duration-300 bg-white/50 p-5 rounded-2xl border border-gray-100">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-[#86868B] ml-1">Registro CIPF</label>
-                    <Input 
-                      placeholder="Ex: a1b2c3d4..." 
-                      value={manualId}
-                      onChange={(e) => setManualId(e.target.value)}
-                      className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 rounded-xl h-12"
-                      required
-                    />
+            {status === 'loading' && (
+              <div className="flex min-h-[300px] flex-col items-center justify-center gap-4">
+                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-blue-50 text-[#155c9c]">
+                  <Loader2 className="h-10 w-10 animate-spin" />
+                </div>
+                <div className="text-center">
+                  <p className="font-bold text-[#17324d]">Validando autenticidade...</p>
+                  <p className="text-sm text-[#617184]">Consultando o registro publico oficial.</p>
+                </div>
+              </div>
+            )}
+
+            {(status === 'valid' || status === 'invalid') && (
+              <div className="mx-auto max-w-2xl space-y-5 animate-in zoom-in-95 duration-500">
+                <div className={`border bg-white p-5 ${isValid ? 'border-green-200 text-green-900' : 'border-red-200 text-red-900'}`}>
+                  <div className="flex items-start gap-4">
+                    <div className={`flex h-14 w-14 shrink-0 items-center justify-center ${isValid ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                      {isValid ? <CheckCircle2 className="h-8 w-8" /> : <XCircle className="h-8 w-8" />}
+                    </div>
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-[0.22em]">{isValid ? 'Documento valido' : 'Documento nao validado'}</p>
+                      <h3 className="mt-1 text-2xl font-black">{isValid ? 'Carteirinha autentica' : 'Nao foi possivel validar'}</h3>
+                      <p className="mt-1 text-sm opacity-85">
+                        {isValid ? 'A assinatura confere com a base publica oficial.' : invalidReason || 'Confira o QR Code ou o codigo informado.'}
+                      </p>
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-[#86868B] ml-1">Assinatura Digital</label>
-                    <Input 
-                      placeholder="Ex: ABC123XYZ" 
-                      value={manualSig}
-                      onChange={(e) => setManualSig(e.target.value)}
-                      className="bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 rounded-xl h-12 font-mono uppercase"
-                      required
-                    />
+                </div>
+
+                {data && (
+                  <div className="border border-[#d8e2ec] bg-white p-5">
+                    <div className="mb-4 flex items-center justify-between gap-3 border-b border-[#edf1f5] pb-4">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-[0.22em] text-[#617184]">Titular</p>
+                        <p className="mt-1 text-lg font-black uppercase leading-tight text-[#17324d]">{data.fullName}</p>
+                      </div>
+                      <div className={`rounded-full px-3 py-1 text-xs font-black uppercase ${isValid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                        {getStatusLabel(data.status)}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="bg-[#f8fbfd] p-4">
+                        <p className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-[#617184]">
+                          <BadgeCheck className="h-4 w-4 text-[#1f8a58]" /> CPF
+                        </p>
+                        <p className="font-bold text-[#17324d]">{data.cpfMasked || '-'}</p>
+                      </div>
+                      <div className="bg-[#f8fbfd] p-4">
+                        <p className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-[#617184]">
+                          <CalendarDays className="h-4 w-4 text-[#155c9c]" /> Validade
+                        </p>
+                        <p className="font-bold text-[#17324d]">{data.expiryDate}</p>
+                        <p className="mt-1 text-xs text-[#617184]">{getValiditySummary(data)}</p>
+                      </div>
+                      <div className="bg-[#f8fbfd] p-4">
+                        <p className="mb-1 text-xs font-black uppercase tracking-wide text-[#617184]">Emissao</p>
+                        <p className="font-bold text-[#17324d]">{data.issueDate || '-'}</p>
+                      </div>
+                      <div className="bg-[#f8fbfd] p-4">
+                        <p className="mb-1 text-xs font-black uppercase tracking-wide text-[#617184]">Assinatura</p>
+                        <p className="font-mono text-sm font-black tracking-widest text-[#17324d]">{data.visualSignature || '------'}</p>
+                      </div>
+                      <div className="bg-[#f8fbfd] p-4 sm:col-span-2">
+                        <p className="mb-1 text-xs font-black uppercase tracking-wide text-[#617184]">Consulta realizada em</p>
+                        <p className="font-bold text-[#17324d]">{consultedAt || '-'}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex gap-3 pt-2">
-                    <Button type="button" variant="ghost" onClick={() => setShowManual(false)} className="flex-1 h-12 rounded-xl text-[#86868B] hover:bg-gray-100">
-                      Cancelar
-                    </Button>
-                    <Button type="submit" className="flex-1 h-12 rounded-xl bg-gray-900 hover:bg-gray-800 text-white font-medium">
-                      Validar
-                    </Button>
+                )}
+
+                {!data && status === 'invalid' && (
+                  <div className="border border-red-100 bg-red-50 p-4 text-sm text-red-800">
+                    <div className="flex gap-3">
+                      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                      <p>A consulta nao retornou dados oficiais para o codigo informado. Confira o QR Code ou a assinatura digital.</p>
+                    </div>
                   </div>
-                </form>
-              )}
-            </div>
-          )}
-
-          {/* LOADING STATE */}
-          {status === 'loading' && (
-            <div className="flex flex-col items-center justify-center py-12 space-y-4 animate-in fade-in">
-              <div className="relative">
-                <div className="w-16 h-16 border-4 border-gray-100 rounded-full"></div>
-                <div className="w-16 h-16 border-4 border-blue-600 rounded-full border-t-transparent animate-spin absolute top-0 left-0"></div>
+                )}
               </div>
-              <p className="text-[#86868B] font-medium animate-pulse">Processando arquivo...</p>
-            </div>
-          )}
+            )}
 
-          {/* VALID STATE */}
-          {status === 'valid' && data && (
-            <div className="flex flex-col items-center space-y-6 animate-in zoom-in-95 duration-500">
-              <div className="w-20 h-20 bg-green-50 rounded-full flex items-center justify-center">
-                <CheckCircle2 className="h-10 w-10 text-green-600" />
-              </div>
-              
-              <div className="text-center space-y-1">
-                <h2 className="text-2xl font-semibold text-[#1D1D1F] tracking-tight">VÁLIDA</h2>
-                <p className="text-[#86868B]">Documento autêntico e ativo</p>
-              </div>
-
-              <div className="w-full bg-gray-50/50 rounded-2xl border border-gray-100 p-5 space-y-4 mt-4">
+            {status === 'error' && (
+              <div className="flex min-h-[300px] flex-col items-center justify-center gap-5 text-center animate-in zoom-in-95 duration-500">
+                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-orange-50 text-orange-600">
+                  <AlertTriangle className="h-10 w-10" />
+                </div>
                 <div>
-                  <p className="text-[10px] text-[#86868B] font-medium uppercase tracking-widest mb-1">Titular da Carteira</p>
-                  <p className="font-medium text-[#1D1D1F] text-lg leading-tight">{data.fullName}</p>
+                  <h3 className="text-2xl font-black text-[#17324d]">Erro na validacao</h3>
+                  <p className="mt-2 max-w-sm text-sm text-[#617184]">{invalidReason || 'Nao foi possivel processar a consulta agora.'}</p>
                 </div>
-                
-                <div className="grid grid-cols-2 gap-4 pt-3 border-t border-gray-100">
-                  <div>
-                    <p className="text-[10px] text-[#86868B] font-medium uppercase tracking-widest mb-1">CPF</p>
-                    <p className="font-medium text-[#1D1D1F]">{data.cpf}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-[#86868B] font-medium uppercase tracking-widest mb-1">Validade</p>
-                    <p className="font-medium text-[#1D1D1F]">{data.expiryDate}</p>
-                  </div>
-                </div>
-
-                <div className="pt-3 border-t border-gray-100">
-                  <p className="text-[10px] text-[#86868B] font-medium uppercase tracking-widest mb-1">Assinatura Digital</p>
-                  <p className="font-mono font-medium tracking-widest text-[#1D1D1F] bg-white py-1.5 px-3 rounded-lg inline-block border border-gray-200">{data.visualSignature}</p>
-                </div>
+                <Button onClick={resetValidation} className="h-12 w-full rounded-xl bg-[#17324d] text-white hover:bg-[#10263b]">
+                  Tentar novamente
+                </Button>
               </div>
+            )}
 
-              <Button onClick={resetValidation} className="w-full h-12 rounded-xl bg-gray-900 hover:bg-gray-800 text-white font-medium shadow-sm mt-4">
-                Realizar Nova Consulta
-              </Button>
-            </div>
-          )}
-
-          {/* INVALID STATE */}
-          {status === 'invalid' && (
-            <div className="flex flex-col items-center space-y-6 animate-in zoom-in-95 duration-500 py-4">
-              <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center">
-                <XCircle className="h-10 w-10 text-red-600" />
+            {status !== 'idle' && status !== 'error' && (
+              <div className="mx-auto mt-5 max-w-2xl">
+                <Button onClick={resetValidation} variant="outline" className="h-12 w-full rounded-xl bg-white">
+                  Fazer nova consulta
+                </Button>
               </div>
-              
-              <div className="text-center space-y-2">
-                <h2 className="text-2xl font-semibold text-[#1D1D1F] tracking-tight">INVÁLIDA</h2>
-                <p className="text-[#86868B]">Este documento não é autêntico ou foi revogado.</p>
-              </div>
+            )}
+          </div>
 
-              <div className="w-full bg-red-50/50 border border-red-100 rounded-2xl p-4 flex items-start gap-3 mt-4">
-                <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
-                <p className="text-sm text-red-800 leading-relaxed">
-                  A assinatura digital não confere com os registros oficiais da Secretaria de Saúde. O documento pode ter sido adulterado.
-                </p>
-              </div>
-
-              <Button onClick={resetValidation} className="w-full h-12 rounded-xl bg-gray-900 hover:bg-gray-800 text-white font-medium shadow-sm mt-4">
-                Tentar Novamente
-              </Button>
-            </div>
-          )}
-
-          {/* ERROR STATE */}
-          {status === 'error' && (
-            <div className="flex flex-col items-center space-y-6 animate-in zoom-in-95 duration-500 py-4">
-              <div className="w-20 h-20 bg-orange-50 rounded-full flex items-center justify-center">
-                <AlertTriangle className="h-10 w-10 text-orange-600" />
-              </div>
-              
-              <div className="text-center space-y-2">
-                <h2 className="text-2xl font-semibold text-[#1D1D1F] tracking-tight">Erro na Leitura</h2>
-                <p className="text-[#86868B]">Não foi possível processar o arquivo ou comunicar com o servidor.</p>
-              </div>
-
-              <Button onClick={resetValidation} className="w-full h-12 rounded-xl bg-gray-900 hover:bg-gray-800 text-white font-medium shadow-sm mt-4">
-                Tentar Novamente
-              </Button>
-            </div>
-          )}
-
-        </div>
-      </div>
-      
-      {/* Footer Branding */}
-      <div className="mt-8 text-center opacity-60">
-        <p className="text-xs font-medium text-[#86868B] tracking-widest uppercase">Sistema Integrado de Saúde</p>
+          <div className="border-t border-[#e3e9ef] bg-white px-5 py-4 text-center text-xs text-[#617184]">
+            A consulta exibe apenas dados publicos de validacao. Documentos e dados sensiveis permanecem protegidos.
+          </div>
+        </section>
       </div>
     </div>
   );
 }
-

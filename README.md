@@ -1,20 +1,52 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Carteirinha de Fibromialgia
 
-# Run and deploy your AI Studio app
+Aplicacao web para cadastro, aprovacao, emissao, impressao e validacao publica da CIPF municipal.
 
-This contains everything you need to run your app locally.
+## Arquitetura atual
 
-View your app in AI Studio: https://ai.studio/apps/e681ea32-686f-4956-ad35-279126ea6b9d
+- **Frontend:** React + Vite.
+- **Banco de dados:** Supabase.
+- **Hospedagem:** Firebase Hosting apenas para publicar o site estatico em `dist/`.
+- **Validacao publica:** QR Code aponta para o proprio app e consulta dados minimos em `public_validations`/`validate_cipf`.
 
-## Run Locally
+## Rodar localmente
 
-**Prerequisites:**  Node.js
+1. Instale as dependencias:
+   ```powershell
+   npm install
+   ```
 
+2. Crie ou ajuste `.env.local` usando `.env.example` como modelo. O minimo para o app web e:
+   ```env
+   VITE_SUPABASE_URL="https://SEU_PROJETO.supabase.co"
+   VITE_SUPABASE_ANON_KEY="SUA_CHAVE_PUBLICAVEL"
+   VITE_APP_URL="http://localhost:5173"
+   ```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+3. Inicie o app:
+   ```powershell
+   npm.cmd run dev
+   ```
+
+4. Abra:
+   ```text
+   http://127.0.0.1:5173
+   ```
+
+## Publicar no Firebase Hosting
+
+1. Gere o build:
+   ```powershell
+   npm.cmd run build
+   ```
+
+2. Publique somente o Hosting:
+   ```powershell
+   npx.cmd firebase-tools deploy --only hosting
+   ```
+
+## Observacoes de seguranca
+
+- Nao coloque `sb_secret`, service role key, senha do banco ou chaves administrativas em variaveis `VITE_*`.
+- `VITE_SUPABASE_ANON_KEY` e publica por natureza em app frontend; a protecao real deve vir de RLS/Supabase Auth ou backend confiavel.
+- Leia `SECURITY.md` e `AI_HANDOFF.md` antes de alterar regras de permissao, validacao publica ou workflow da carteirinha.

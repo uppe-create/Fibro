@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Bell, AlertCircle, Clock, Database } from 'lucide-react';
 import { useAppStore } from '@/store/useAppStore';
 import { Button } from '@/components/ui/button';
+import { daysUntil, parseBRDate } from '@/lib/date';
 
 export function Notifications() {
   const { registrations, fetchRegistrations, currentUser, lastBackupDate, exportDatabase } = useAppStore();
@@ -29,22 +30,15 @@ export function Notifications() {
   // Calculate expiring registrations (within 30 days or already expired)
   const expiringRegistrations = registrations.filter(reg => {
     if (!reg.expiryDate) return false;
-    
-    const expiryDate = new Date(reg.expiryDate);
-    const today = new Date();
-    
-    // Reset time to compare just dates
-    expiryDate.setHours(0, 0, 0, 0);
-    today.setHours(0, 0, 0, 0);
-    
-    const diffTime = expiryDate.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    // Return true if it expires within 30 days (including already expired ones, e.g., diffDays <= 30)
-    // We might want to only show active ones that are expiring, or expired ones too.
-    return diffDays <= 30 && reg.status !== 'pending';
+    const diffDays = daysUntil(reg.expiryDate);
+    return diffDays !== null && diffDays <= 30 && reg.status !== 'pending';
   }).sort((a, b) => {
-    return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+    const aDate = parseBRDate(a.expiryDate);
+    const bDate = parseBRDate(b.expiryDate);
+    if (!aDate && !bDate) return 0;
+    if (!aDate) return 1;
+    if (!bDate) return -1;
+    return aDate.getTime() - bDate.getTime();
   });
 
   const needsBackup = currentUser?.role === 'admin' && (!lastBackupDate || (Date.now() - lastBackupDate > 7 * 24 * 60 * 60 * 1000));
@@ -109,13 +103,7 @@ export function Notifications() {
                 )}
                 
                 {expiringRegistrations.map(reg => {
-                  const expiryDate = new Date(reg.expiryDate);
-                  const today = new Date();
-                  expiryDate.setHours(0, 0, 0, 0);
-                  today.setHours(0, 0, 0, 0);
-                  
-                  const diffTime = expiryDate.getTime() - today.getTime();
-                  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                  const diffDays = daysUntil(reg.expiryDate) ?? 0;
                   
                   const isExpired = diffDays < 0;
                   

@@ -30,6 +30,16 @@ export function formatPhone(value: string) {
     .replace(/(-\d{4})\d+?$/, "$1");
 }
 
+export function formatCNS(value: string) {
+  return value
+    .replace(/\D/g, "")
+    .slice(0, 15)
+    .replace(/(\d{3})(\d)/, "$1 $2")
+    .replace(/(\d{4})(\d)/, "$1 $2")
+    .replace(/(\d{4})(\d)/, "$1 $2")
+    .replace(/( \d{4})\d+?$/, "$1");
+}
+
 export function validateCPF(cpf: string): boolean {
   cpf = cpf.replace(/[^\d]+/g, '');
   if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;

@@ -1,60 +1,66 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { useAppStore } from '@/store/useAppStore';
-import { Search, Printer, FileBadge2, Loader2, Download, Image as ImageIcon } from 'lucide-react';
+import { CIPFRegistration, useAppStore } from '@/store/useAppStore';
+import { Search, FileBadge2, Loader2, Image as ImageIcon } from 'lucide-react';
 import * as htmlToImage from 'html-to-image';
-import { db } from '../firebase';
-import { doc, getDoc } from 'firebase/firestore';
 import { CarteirinhaPreview } from '@/components/CarteirinhaPreview';
+import { loadCipfFileDataUri } from '@/lib/cipf-files';
+import { hasPermission } from '@/lib/permissions';
+import { supabase } from '@/lib/supabase';
+import { logAuditEvent } from '@/lib/audit';
+import { getStatusLabel, isPrintableStatus, normalizeRegistrationStatus } from '@/lib/registration-status';
+
+const PRINT_REGISTRATION_STORAGE_KEY = 'cipf_print_registration_id';
 
 export function Carteirinha() {
-  const { registrations, fetchRegistrations } = useAppStore();
+  const { registrations, fetchRegistrations, currentUser } = useAppStore();
+  const canPrintCarteirinha = hasPermission(currentUser, 'printCarteirinha');
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedReg, setSelectedReg] = useState<any>(null);
+  const [selectedReg, setSelectedReg] = useState<CIPFRegistration | null>(null);
   const [photoDataUri, setPhotoDataUri] = useState<string>('');
   const [isImageLoaded, setIsImageLoaded] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
+  const queryParams = new URLSearchParams(window.location.search);
+  const searchFromUrlRef = useRef(
+    queryParams.get('id') || sessionStorage.getItem(PRINT_REGISTRATION_STORAGE_KEY) || queryParams.get('search') || ''
+  );
+
+  if (!canPrintCarteirinha) {
+    return (
+      <div className="mx-auto max-w-xl rounded-2xl border border-red-100 bg-red-50 p-6 text-center text-red-800">
+        <h2 className="text-xl font-black">Impressao restrita</h2>
+        <p className="mt-2 text-sm">
+          Por protecao de dados e LGPD, somente o perfil Administrador pode visualizar e baixar carteirinhas para impressao.
+        </p>
+      </div>
+    );
+  }
 
   useEffect(() => {
-    const loadData = async () => {
-      setIsLoading(true);
-      await fetchRegistrations();
-      setIsLoading(false);
-      
-      // Auto-search if URL parameter is present
-      const urlParams = new URLSearchParams(window.location.search);
-      const searchParam = urlParams.get('search');
-      if (searchParam) {
-        setSearchTerm(searchParam);
-        // We need to wait a tick for state to update, or just call handleSearch directly with the param
-        // But handleSearch uses the searchTerm state. Let's modify handleSearch to accept an optional param.
+    const bootstrap = async () => {
+      if (registrations.length === 0) {
+        setIsLoading(true);
+        await fetchRegistrations();
+        setIsLoading(false);
+      }
+
+      if (searchFromUrlRef.current) {
+        setSearchTerm(searchFromUrlRef.current);
       }
     };
+    bootstrap();
+  }, [fetchRegistrations, registrations.length]);
 
-    if (registrations.length === 0) {
-      loadData();
-    } else {
-      const urlParams = new URLSearchParams(window.location.search);
-      const searchParam = urlParams.get('search');
-      if (searchParam) {
-        setSearchTerm(searchParam);
-      }
-    }
-  }, []);
-
-  // Trigger search when searchTerm is set from URL initially
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const searchParam = urlParams.get('search');
-    if (searchParam && searchTerm === searchParam && registrations.length > 0) {
-      handleSearch(searchParam);
-      // Remove param from URL so it doesn't trigger again on refresh
-      window.history.replaceState({}, '', '/carteirinha');
-    }
-  }, [searchTerm, registrations]);
+    if (!searchFromUrlRef.current || registrations.length === 0) return;
+    handleSearch(searchFromUrlRef.current);
+    sessionStorage.removeItem(PRINT_REGISTRATION_STORAGE_KEY);
+    window.history.replaceState({}, '', '/carteirinha');
+    searchFromUrlRef.current = '';
+  }, [registrations.length]);
 
   const handleSearch = async (termToSearch?: string) => {
     const term = typeof termToSearch === 'string' ? termToSearch : searchTerm;
@@ -66,48 +72,29 @@ export function Carteirinha() {
       return;
     }
     
-    const found = registrations.find(r => 
-      r.cpf.includes(term) || r.fullName.toLowerCase().includes(term.toLowerCase())
+    const normalizedTerm = term.trim().toLowerCase();
+    const digitsTerm = term.replace(/\D/g, '');
+
+    const found = registrations.find(r =>
+      r.id === term ||
+      r.cpf.includes(digitsTerm || term) ||
+      (r.cns || '').includes(digitsTerm || term) ||
+      r.fullName.toLowerCase().includes(normalizedTerm)
     );
     
     setIsImageLoaded(false);
     
     if (found) {
-      setSelectedReg(found);
-      
-      // Fetch photo if using the new ID-based system
-      if (found.photoFileId) {
-        try {
-          const docRef = doc(db, 'cipf_files', found.photoFileId);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            const fileData = docSnap.data();
-            if (fileData.data) {
-              setPhotoDataUri(fileData.data);
-            } else if (fileData.totalChunks) {
-              const chunkPromises = [];
-              for (let i = 0; i < fileData.totalChunks; i++) {
-                chunkPromises.push(getDoc(doc(db, 'cipf_files', found.photoFileId, 'chunks', i.toString())));
-              }
-              const chunkSnaps = await Promise.all(chunkPromises);
-              let fullData = '';
-              chunkSnaps.forEach(snap => {
-                if (snap.exists()) {
-                  fullData += snap.data().data;
-                }
-              });
-              setPhotoDataUri(fullData);
-            }
-          } else {
-            setPhotoDataUri(found.photoUrl || '');
-          }
-        } catch (e) {
-          console.error("Error fetching photo", e);
-          setPhotoDataUri(found.photoUrl || '');
-        }
-      } else {
-        setPhotoDataUri(found.photoUrl || '');
+      if (!isPrintableStatus(found.status)) {
+        alert(`Cadastro encontrado, mas o status atual e "${getStatusLabel(found.status)}". Apenas carteirinhas aprovadas ou emitidas podem ser impressas.`);
+        setSelectedReg(null);
+        setPhotoDataUri('');
+        return;
       }
+      setSelectedReg(found);
+      setSearchTerm(found.fullName);
+      const photoUri = await loadCipfFileDataUri(found.photoFileId, found.photoUrl || '');
+      setPhotoDataUri(photoUri);
     } else {
       alert('Nenhum cadastro encontrado com este nome ou CPF.');
       setSelectedReg(null);
@@ -116,10 +103,45 @@ export function Carteirinha() {
   };
 
   const handlePrint = async () => {
-    if (!printRef.current) return;
+    if (!printRef.current || !selectedReg) return;
+    if (!canPrintCarteirinha) {
+      alert('Seu perfil nao permite baixar carteirinhas.');
+      return;
+    }
     
     try {
       setIsPrinting(true);
+      if (normalizeRegistrationStatus(selectedReg.status) === 'approved') {
+        const issueDate = new Date();
+        const expiryDate = new Date(issueDate);
+        expiryDate.setFullYear(expiryDate.getFullYear() + 2);
+        const payload = {
+          status: 'issued',
+          issueDate: issueDate.toLocaleDateString('pt-BR'),
+          expiryDate: expiryDate.toLocaleDateString('pt-BR')
+        };
+        const { error: registrationError } = await supabase.from('registrations').update(payload).eq('id', selectedReg.id);
+        if (registrationError) throw registrationError;
+        const { error: publicError } = await supabase.from('public_validations').update(payload).eq('id', selectedReg.id);
+        if (publicError) throw publicError;
+        const { error: indexError } = await supabase
+          .from('registration_index')
+          .update({ status: 'issued', updated_at: new Date().toISOString() })
+          .eq('cpf', selectedReg.cpf.replace(/\D/g, ''));
+        if (indexError) throw indexError;
+
+        await logAuditEvent({
+          action: 'Carteirinha Emitida',
+          registrationId: selectedReg.id,
+          userId: currentUser?.id || null,
+          userName: currentUser?.name || 'Sistema',
+          reason: 'Download PNG pelo modulo Carteirinha'
+        });
+
+        setSelectedReg({ ...selectedReg, ...payload, status: 'issued' });
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        await fetchRegistrations();
+      }
       
       // Capture the element as a PNG using html-to-image
       const dataUrl = await htmlToImage.toPng(printRef.current, {
@@ -144,34 +166,6 @@ export function Carteirinha() {
     }
   };
 
-  // Format the ID to look like a registration number (e.g., first 8 chars)
-  const formatRegistro = (id: string) => {
-    return id.substring(0, 8).toUpperCase();
-  };
-
-  // Helper to get a valid, publicly accessible URL for the QR Code
-  const getBaseUrl = () => {
-    try {
-      const origin = window.location.origin;
-      
-      // If running in a sandboxed iframe where origin is null
-      if (!origin || origin === 'null') {
-        return 'https://ais-pre-geuns4xwjglsjownoqyjdq-511970797741.us-east1.run.app';
-      }
-      
-      // Convert AI Studio private dev URL to public shared URL so phones can access it
-      if (origin.includes('ais-dev-')) {
-        return origin.replace('ais-dev-', 'ais-pre-');
-      }
-      
-      return origin;
-    } catch (e) {
-      return 'https://ais-pre-geuns4xwjglsjownoqyjdq-511970797741.us-east1.run.app';
-    }
-  };
-
-  const validationUrl = selectedReg ? `${getBaseUrl()}/valida?id=${selectedReg.id}&sig=${selectedReg.visualSignature || ''}` : '';
-
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/20 overflow-hidden print:hidden">
@@ -180,7 +174,7 @@ export function Carteirinha() {
             <FileBadge2 className="w-8 h-8 text-blue-600" />
           </div>
           <h2 className="text-2xl font-semibold text-[#1D1D1F] tracking-tight">Consulta de Carteirinha</h2>
-          <p className="text-[#86868B] mt-1">Busque por um cadastro ativo para visualizar e imprimir a CIPF.</p>
+          <p className="text-[#86868B] mt-1">Busque por um cadastro aprovado ou emitido para gerar a CIPF.</p>
         </div>
         <div className="p-8 bg-gray-50/30">
           <div className="flex flex-col sm:flex-row gap-3 max-w-2xl mx-auto">
@@ -216,7 +210,7 @@ export function Carteirinha() {
           <div className="flex justify-end print:hidden">
             <Button 
               onClick={handlePrint} 
-              disabled={isPrinting || (!!photoDataUri && !isImageLoaded)}
+              disabled={!canPrintCarteirinha || isPrinting || (!!photoDataUri && !isImageLoaded)}
               className="rounded-xl h-10 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-all active:scale-[0.98] disabled:opacity-50"
             >
               {isPrinting ? (

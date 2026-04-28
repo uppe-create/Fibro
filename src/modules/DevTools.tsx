@@ -1,67 +1,106 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { db } from '../firebase';
-import { collection, addDoc } from 'firebase/firestore';
+import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
-import { Loader2, Bug, Trash2 } from 'lucide-react';
+import { hasPermission } from '@/lib/permissions';
+import { Loader2, Bug } from 'lucide-react';
 
 export function DevTools() {
   const [loading, setLoading] = useState(false);
   const { currentUser, fetchRegistrations } = useAppStore();
 
   const generateFakeUsers = async () => {
+    if (!hasPermission(currentUser, 'useDevTools')) {
+      alert('Apenas administradores podem gerar dados falsos.');
+      return;
+    }
     setLoading(true);
     try {
-      const firstNames = ['Ana', 'João', 'Maria', 'Pedro', 'Lucas', 'Julia', 'Marcos', 'Fernanda', 'Carlos', 'Beatriz'];
+      assertSupabaseConfigured();
+
+      const firstNames = ['Ana', 'Joao', 'Maria', 'Pedro', 'Lucas', 'Julia', 'Marcos', 'Fernanda', 'Carlos', 'Beatriz'];
       const lastNames = ['Silva', 'Santos', 'Oliveira', 'Souza', 'Rodrigues', 'Ferreira', 'Alves', 'Lima', 'Gomes', 'Costa'];
       const bairros = ['Centro', 'Jardim Paulista', 'Vila Madalena', 'Pinheiros', 'Mooca', 'Santana', 'Itaquera', 'Lapa'];
-      
+
       for (let i = 0; i < 5; i++) {
         const name = `${firstNames[Math.floor(Math.random() * firstNames.length)]} ${lastNames[Math.floor(Math.random() * lastNames.length)]}`;
         const cpf = `${Math.floor(Math.random() * 999).toString().padStart(3, '0')}${Math.floor(Math.random() * 999).toString().padStart(3, '0')}${Math.floor(Math.random() * 999).toString().padStart(3, '0')}${Math.floor(Math.random() * 99).toString().padStart(2, '0')}`;
-        
+
         const issueDate = new Date();
         const expiryDate = new Date();
         expiryDate.setFullYear(expiryDate.getFullYear() + 2);
-        
-        // Random birthdate between 1950 and 2005
+        const visualSignature = Math.random().toString(36).substring(2, 8).toUpperCase();
+
         const birthYear = Math.floor(Math.random() * (2005 - 1950 + 1)) + 1950;
         const birthMonth = Math.floor(Math.random() * 12) + 1;
         const birthDay = Math.floor(Math.random() * 28) + 1;
 
-        await addDoc(collection(db, 'registrations'), {
+        const { data: inserted, error: regError } = await supabase
+          .from('registrations')
+          .insert({
+            fullName: name.toUpperCase(),
+            cpf,
+            phone: '11999999999',
+            birthDate: `${birthDay.toString().padStart(2, '0')}/${birthMonth.toString().padStart(2, '0')}/${birthYear}`,
+            legalGuardian: null,
+            cep: '01001000',
+            logradouro: 'Rua Ficticia, 123',
+            bairro: bairros[Math.floor(Math.random() * bairros.length)],
+            cidade: 'Sao Paulo',
+            estado: 'SP',
+            documentUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+            proofOfResidenceUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+            proofOfResidenceDate: '01/01/2026',
+            medicalReportUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+            medicalReportDate: '01/01/2026',
+            cid: 'M79.7',
+            justificativaCid: null,
+            crm: '12345-SP',
+            photoUrl: `https://picsum.photos/seed/${Math.random()}/300/400`,
+            issueDate: issueDate.toLocaleDateString('pt-BR'),
+            expiryDate: expiryDate.toLocaleDateString('pt-BR'),
+            status: 'active',
+            visualSignature,
+            checksum: 'fake-checksum',
+            userId: currentUser?.id || 'admin'
+          })
+          .select('id')
+          .single();
+
+        if (regError || !inserted?.id) {
+          throw new Error(regError?.message || 'Falha ao criar registro fake.');
+        }
+
+        const { error: indexError } = await supabase.from('registration_index').upsert({
+          cpf,
+          registration_id: inserted.id,
+          status: 'active',
+          updated_at: new Date().toISOString()
+        });
+        if (indexError) throw new Error(indexError.message);
+
+        const { error: publicValidationError } = await supabase.from('public_validations').upsert({
+          id: inserted.id,
           fullName: name.toUpperCase(),
-          cpf: cpf,
-          phone: '11999999999',
-          birthDate: `${birthDay.toString().padStart(2, '0')}/${birthMonth.toString().padStart(2, '0')}/${birthYear}`,
-          legalGuardian: null,
-          cep: '01001000',
-          logradouro: 'Rua Fictícia, 123',
-          bairro: bairros[Math.floor(Math.random() * bairros.length)],
-          cidade: 'São Paulo',
-          estado: 'SP',
-          documentUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-          proofOfResidenceUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-          proofOfResidenceDate: '01/01/2026',
-          medicalReportUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
-          medicalReportDate: '01/01/2026',
-          cid: 'M79.7',
-          justificativaCid: null,
-          crm: '12345-SP',
-          photoUrl: `https://picsum.photos/seed/${Math.random()}/300/400`,
+          cpfMasked: '***.***.***-**',
           issueDate: issueDate.toLocaleDateString('pt-BR'),
           expiryDate: expiryDate.toLocaleDateString('pt-BR'),
           status: 'active',
-          visualSignature: Math.random().toString(36).substring(2, 8).toUpperCase(),
-          checksum: 'fake-checksum',
-          userId: currentUser?.id || 'admin'
+          visualSignature,
+          checksum: 'fake-checksum'
         });
+        if (publicValidationError) throw new Error(publicValidationError.message);
       }
+
       await fetchRegistrations();
-      alert('5 usuários falsos gerados com sucesso!');
-    } catch (error) {
+      alert('5 usuarios falsos gerados com sucesso!');
+    } catch (error: any) {
       console.error(error);
-      alert('Erro ao gerar usuários falsos.');
+      if (error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache')) {
+        alert('Supabase sem schema pronto para o app. Rode o arquivo supabase-schema.sql no SQL Editor do projeto.');
+        return;
+      }
+      alert(`Erro ao gerar usuarios falsos: ${error?.message || 'erro desconhecido'}`);
     } finally {
       setLoading(false);
     }
@@ -76,18 +115,18 @@ export function DevTools() {
           </div>
           <div>
             <h2 className="text-2xl font-bold text-[#1D1D1F]">Painel de Desenvolvimento</h2>
-            <p className="text-[#86868B] text-sm mt-1">Apenas para testes. Remova antes de ir para produção.</p>
+            <p className="text-[#86868B] text-sm mt-1">Apenas para testes. Remova antes de ir para producao.</p>
           </div>
         </div>
-        
+
         <div className="bg-red-50/50 border border-red-100 rounded-2xl p-6 mb-8">
           <h3 className="font-medium text-red-800 mb-2">Gerador de Dados Falsos</h3>
           <p className="text-sm text-red-600/80 mb-6">
-            Isso irá criar 5 registros aleatórios no banco de dados para que você possa testar o Dashboard, paginação, filtros e gráficos sem precisar preencher o formulário manualmente.
+            Isso cria 5 registros aleatorios para testar dashboard, filtros e graficos.
           </p>
-          <Button 
-            onClick={generateFakeUsers} 
-            disabled={loading} 
+          <Button
+            onClick={generateFakeUsers}
+            disabled={loading}
             className="bg-red-600 hover:bg-red-700 text-white rounded-xl h-12 px-6"
           >
             {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bug className="w-4 h-4 mr-2" />}

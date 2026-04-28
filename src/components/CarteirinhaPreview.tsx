@@ -1,7 +1,10 @@
-import React, { useState, forwardRef } from 'react';
-import { Loader2, Image as ImageIcon } from 'lucide-react';
+import React, { forwardRef, useState } from 'react';
+import { BadgeCheck, Image as ImageIcon, Loader2, QrCode, ShieldCheck, Stamp } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { CIPFRegistration } from '@/store/useAppStore';
+import { getAppBaseUrl } from '@/lib/app-url';
+import { formatCNS } from '@/lib/utils';
+import prefeituraLogo from '@/assets/prefeitura-logo.png';
 
 interface CarteirinhaPreviewProps {
   registration: CIPFRegistration;
@@ -9,234 +12,211 @@ interface CarteirinhaPreviewProps {
   onImageLoad?: () => void;
 }
 
+const CARD_SIZE = 'w-[8.5cm] h-[5.4cm]';
+
+// Print layout uses physical dimensions. Be careful changing CARD_SIZE or font
+// sizes: the PNG export and real-world print depend on this balance.
+function formatRegistro(id: string) {
+  return id.substring(0, 8).toUpperCase();
+}
+
+function formatCpf(cpf: string) {
+  const digits = cpf.replace(/\D/g, '');
+  if (digits.length !== 11) return cpf;
+  return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+}
+
+function getSusNumber(registration: CIPFRegistration) {
+  const extraData = registration as CIPFRegistration & { cns?: string; cartaoSus?: string; sus?: string };
+  const rawNumber = extraData.cns || extraData.cartaoSus || extraData.sus || '';
+  return rawNumber ? formatCNS(rawNumber) : 'Nao informado';
+}
+
+function Field({ label, value, className = '' }: { label: string; value?: string; className?: string }) {
+  return (
+    <div className={`min-w-0 ${className}`}>
+      <p className="text-[4.7px] font-black uppercase leading-none text-[#47617d]">{label}</p>
+      <div className="mt-[1px] flex h-[15px] items-center border border-[#cbd8e3] bg-white px-1">
+        <p className="truncate text-[7px] font-bold leading-none text-[#17324d]">{value || '-'}</p>
+      </div>
+    </div>
+  );
+}
+
 export const CarteirinhaPreview = forwardRef<HTMLDivElement, CarteirinhaPreviewProps>(
   ({ registration, photoDataUri, onImageLoad }, ref) => {
     const [isImageLoaded, setIsImageLoaded] = useState(false);
+    // QR Code carries only id + visual signature. Sensitive registration fields
+    // never travel in the public URL.
+    const validationUrl = `${getAppBaseUrl()}/valida?id=${registration.id}&sig=${registration.visualSignature || ''}`;
+    const registryNumber = `${formatRegistro(registration.id)}/${new Date().getFullYear()}`;
 
     const handleImageLoad = () => {
       setIsImageLoaded(true);
-      if (onImageLoad) onImageLoad();
+      onImageLoad?.();
     };
-
-    // Format the ID to look like a registration number (e.g., first 8 chars)
-    const formatRegistro = (id: string) => {
-      return id.substring(0, 8).toUpperCase();
-    };
-
-    // Helper to get a valid, publicly accessible URL for the QR Code
-    const getBaseUrl = () => {
-      try {
-        const origin = window.location.origin;
-        
-        // If running in a sandboxed iframe where origin is null
-        if (!origin || origin === 'null') {
-          return 'https://ais-pre-geuns4xwjglsjownoqyjdq-511970797741.us-east1.run.app';
-        }
-        
-        // Convert AI Studio private dev URL to public shared URL so phones can access it
-        if (origin.includes('ais-dev-')) {
-          return origin.replace('ais-dev-', 'ais-pre-');
-        }
-        
-        return origin;
-      } catch (e) {
-        return 'https://ais-pre-geuns4xwjglsjownoqyjdq-511970797741.us-east1.run.app';
-      }
-    };
-
-    const validationUrl = registration ? `${getBaseUrl()}/valida?id=${registration.id}&sig=${registration.visualSignature || ''}` : '';
 
     return (
-      <div ref={ref} className="flex flex-col gap-8 p-4 bg-[#ffffff]">
-        {/* Frente da Carteirinha */}
-        <div className="w-[8.5cm] h-[5.4cm] rounded-lg border border-gray-300 bg-white shadow-2xl relative flex flex-col print:shadow-none print:border-gray-400 print:mb-[1cm] print:mx-auto overflow-hidden" style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
-          
-          {/* Background Pattern / Watermark */}
-          <div className="absolute inset-0 opacity-[0.03] pointer-events-none flex items-center justify-center overflow-hidden">
-            <div className="w-64 h-64 border-[40px] border-blue-900 rounded-full absolute -right-16 -bottom-16"></div>
-            <div className="w-48 h-48 border-[20px] border-indigo-900 rounded-full absolute -left-12 -top-12"></div>
+      <div ref={ref} className="flex flex-col gap-6 bg-white p-3 print-clean">
+        <div
+          className={`${CARD_SIZE} print-clean relative flex overflow-hidden border border-[#9fb3c8] bg-[#f8fbfd] shadow-lg print:mx-auto print:mb-[1cm] print:border-gray-400 print:shadow-none`}
+          style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+        >
+          <div className="absolute inset-x-0 top-0 h-2 bg-[linear-gradient(90deg,#155c9c_0%,#155c9c_42%,#1f8a58_42%,#1f8a58_76%,#f2c94c_76%,#f2c94c_100%)]" />
+          <div className="absolute bottom-0 left-0 top-2 w-[0.42cm] bg-[#155c9c]" />
+          <div className="absolute bottom-0 left-[0.42cm] top-2 w-[0.12cm] bg-[#1f8a58]" />
+          <div className="pointer-events-none absolute -right-5 bottom-4 text-[48px] font-black tracking-[-0.08em] text-[#17324d]/[0.05]">
+            CIPF
           </div>
 
-          {/* Header */}
-          <div className="flex items-center justify-between px-3 pt-2 pb-1.5 bg-gradient-to-r from-blue-50 to-indigo-50/50 border-b border-blue-100/50 relative z-10">
-            {/* Logo Left */}
-            <div className="flex flex-col items-center justify-center w-12">
-              <div className="w-7 h-7 bg-gradient-to-br from-blue-600 to-blue-800 rounded-full flex items-center justify-center mb-0.5 relative overflow-hidden shadow-sm border border-blue-200">
-                <div className="absolute bottom-0 w-full h-2.5 bg-green-500"></div>
-                <div className="w-3.5 h-3.5 bg-yellow-400 rounded-sm z-10 shadow-sm"></div>
+          <div className="relative flex h-full flex-1 flex-col pl-[0.72cm]">
+            <header className="flex h-[0.92cm] shrink-0 items-center justify-between border-b border-[#d7e2ed] bg-white px-2.5 pt-1.5">
+              <div className="flex items-center gap-1.5">
+                <img src={prefeituraLogo} alt="Prefeitura de Ipero" className="h-[0.55cm] w-[1.22cm] object-contain" />
+                <div>
+                  <p className="text-[4.6px] font-black uppercase leading-none text-[#1f8a58]">Prefeitura Municipal de Ipero</p>
+                  <h2 className="mt-[1px] text-[7.7px] font-black uppercase leading-[1.02] text-[#17324d]">
+                    Carteira de Identificacao
+                    <br />
+                    Pessoa com Fibromialgia
+                  </h2>
+                </div>
               </div>
-              <span className="text-[4px] font-extrabold uppercase leading-tight text-center text-blue-950 tracking-wider">Prefeitura de<br/>Iperó</span>
-            </div>
-
-            {/* Center Title */}
-            <div className="flex-1 text-center px-1">
-              <h2 className="text-[8.5px] font-extrabold text-blue-950 leading-tight uppercase tracking-wide">Carteira de Identificação<br/>Pessoa com Fibromialgia</h2>
-              <div className="inline-block bg-indigo-100/80 px-2 py-0.5 rounded-full mt-0.5 border border-indigo-200/50">
-                <p className="text-[5.5px] font-bold text-indigo-800 uppercase tracking-widest">CID. {registration.cid || 'M79.7'}</p>
+              <div className="border border-[#f2c94c] bg-[#fff8dc] px-1.5 py-0.5 text-right">
+                <p className="text-[4.4px] font-black uppercase leading-none text-[#7a5a00]">Registro</p>
+                <p className="mt-[1px] text-[6.5px] font-black leading-none text-[#17324d]">{registryNumber}</p>
               </div>
-            </div>
+            </header>
 
-            {/* Right Info */}
-            <div className="w-16 text-right flex flex-col items-end">
-              <p className="text-[5px] font-bold text-gray-500 uppercase tracking-widest">Nº Registro</p>
-              <p className="text-[7.5px] font-bold text-red-700 bg-red-50 px-1.5 py-0.5 rounded border border-red-100 mt-0.5">{formatRegistro(registration.id)}/{new Date().getFullYear()}</p>
-            </div>
-          </div>
-
-          {/* Colored Bar */}
-          <div className="h-1.5 w-full bg-gradient-to-r from-blue-700 via-indigo-600 to-purple-600 relative z-10 shadow-sm"></div>
-
-          {/* Body */}
-          <div className="flex-1 flex flex-col px-3 py-2 gap-1.5 relative z-10 bg-gradient-to-b from-white to-gray-50/50">
-            
-            {/* Nome Row */}
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[6px] font-bold text-gray-500 uppercase tracking-widest ml-0.5">Nome do Titular</span>
-              <div className="w-full bg-white border border-gray-200 shadow-sm h-5 rounded px-1.5 flex items-center">
-                <span className="text-[8.5px] font-bold text-gray-900 truncate">{registration.fullName}</span>
-              </div>
-            </div>
-
-            {/* Photo and Details Row */}
-            <div className="flex gap-2.5 flex-1 mt-0.5">
-              {/* Photo */}
-              <div className="w-[1.9cm] h-[2.5cm] bg-white border border-gray-300 shadow-sm rounded overflow-hidden relative flex-shrink-0 p-0.5">
-                <div className="w-full h-full rounded-sm overflow-hidden relative bg-gray-50">
+            <main className="grid h-[3.96cm] shrink-0 grid-cols-[1.88cm_1fr] gap-1.5 px-2.5 py-1.5">
+              <div className="flex flex-col gap-1">
+                <div className="relative h-[2.35cm] overflow-hidden border-2 border-white bg-[#e9eef5] shadow-sm outline outline-1 outline-[#b7c7d8]">
                   {!isImageLoaded && photoDataUri && (
-                    <div className="absolute inset-0 flex items-center justify-center text-blue-300 bg-blue-50/50 z-10">
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#eaf3fb] text-[#155c9c]">
+                      <Loader2 className="h-4 w-4 animate-spin" />
                     </div>
                   )}
                   {photoDataUri ? (
-                    <img 
-                      src={photoDataUri} 
-                      alt="Foto" 
+                    <img
+                      src={photoDataUri}
+                      alt="Foto"
                       loading="lazy"
                       onLoad={handleImageLoad}
                       onError={handleImageLoad}
-                      className={`w-full h-full object-cover transition-opacity duration-500 ${isImageLoaded ? 'opacity-100' : 'opacity-0'}`} 
+                      className={`h-full w-full object-cover transition-opacity duration-300 ${
+                        isImageLoaded ? 'opacity-100' : 'opacity-0'
+                      }`}
                     />
                   ) : (
-                    <div className="w-full h-full bg-gray-100 flex items-center justify-center">
-                      <ImageIcon className="w-6 h-6 text-gray-300" />
+                    <div className="flex h-full w-full items-center justify-center">
+                      <ImageIcon className="h-7 w-7 text-[#9fb3c8]" />
                     </div>
                   )}
                 </div>
-              </div>
-
-              {/* Details */}
-              <div className="flex-1 flex flex-col justify-between py-0.5">
-                {/* DN and CPF */}
-                <div className="flex gap-1.5">
-                  <div className="flex flex-col gap-0.5 flex-1">
-                    <span className="text-[5.5px] font-bold text-gray-500 uppercase tracking-widest ml-0.5">Data Nasc.</span>
-                    <div className="flex-1 bg-white border border-gray-200 shadow-sm h-4.5 rounded px-1 flex items-center">
-                      <span className="text-[7.5px] font-bold text-gray-900">{registration.birthDate}</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-0.5 flex-1">
-                    <span className="text-[5.5px] font-bold text-gray-500 uppercase tracking-widest ml-0.5">CPF</span>
-                    <div className="flex-1 bg-white border border-gray-200 shadow-sm h-4.5 rounded px-1 flex items-center">
-                      <span className="text-[7.5px] font-bold text-gray-900">{registration.cpf}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* CNS */}
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[5.5px] font-bold text-gray-500 uppercase tracking-widest ml-0.5">Cartão Nacional de Saúde (CNS)</span>
-                  <div className="w-full bg-white border border-gray-200 shadow-sm h-4.5 rounded px-1 flex items-center">
-                    <span className="text-[7.5px] font-bold text-gray-900"></span>
-                  </div>
-                </div>
-
-                {/* Emissão e Validade */}
-                <div className="flex gap-1.5">
-                  <div className="flex flex-col gap-0.5 flex-1">
-                    <span className="text-[5.5px] font-bold text-gray-500 uppercase tracking-widest ml-0.5">Emissão</span>
-                    <div className="flex-1 bg-white border border-gray-200 shadow-sm h-4.5 rounded px-1 flex items-center">
-                      <span className="text-[7.5px] font-bold text-gray-900">{registration.issueDate}</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-0.5 flex-1">
-                    <span className="text-[5.5px] font-bold text-gray-500 uppercase tracking-widest ml-0.5">Validade</span>
-                    <div className="flex-1 bg-white border border-gray-200 shadow-sm h-4.5 rounded px-1 flex items-center">
-                      <span className="text-[7.5px] font-bold text-gray-900">{registration.expiryDate}</span>
-                    </div>
-                  </div>
+                <div className="bg-[#155c9c] px-1 py-0.5 text-center text-white">
+                  <p className="text-[4.8px] font-black uppercase leading-none">CID {registration.cid || 'M79.7'}</p>
                 </div>
               </div>
-            </div>
-          </div>
 
-          {/* Footer */}
-          <div className="h-7 flex items-center justify-between px-4 relative pb-1 bg-gray-100/50 border-t border-gray-200/50 z-10">
-            <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full bg-purple-500 shadow-sm"></div>
-              <p className="text-[5px] font-bold text-gray-600 uppercase tracking-widest">Válido em todo território municipal</p>
-            </div>
-            <div className="text-right">
-              <p className="text-[6px] font-bold text-gray-800">Secretaria Municipal de Saúde</p>
-              <p className="text-[5px] font-bold text-gray-500">Lei Municipal nº 2.690/2026</p>
-            </div>
+              <div className="flex min-w-0 flex-col gap-1">
+                <div>
+                  <p className="text-[4.7px] font-black uppercase leading-none text-[#47617d]">Nome do titular</p>
+                  <div className="mt-[1px] flex h-[21px] items-center border-l-4 border-[#1f8a58] bg-white px-1.5 shadow-sm">
+                    <p className="truncate text-[8.1px] font-black uppercase leading-none text-[#17324d]">{registration.fullName}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1">
+                  <Field label="CPF" value={formatCpf(registration.cpf)} />
+                  <Field label="Cartao SUS" value={getSusNumber(registration)} />
+                </div>
+
+                <div className="border border-[#cbd8e3] bg-[#f6fafc] px-1.5 py-1">
+                  <p className="text-[4.7px] font-black uppercase leading-none text-[#47617d]">Municipio emissor</p>
+                  <p className="mt-[2px] truncate text-[7.5px] font-black uppercase leading-none text-[#17324d]">
+                    {`${registration.cidade || 'IPERO'}${registration.estado ? `/${registration.estado}` : ''}`}
+                  </p>
+                </div>
+
+                <div className="border-l-4 border-[#f2c94c] bg-[#fff8dc] px-1.5 py-1">
+                  <p className="flex items-center gap-1 text-[5.3px] font-bold leading-[1.15] text-[#4a3a08]">
+                    <Stamp className="h-2 w-2 shrink-0" />
+                    Atendimento prioritario. Datas de emissao e validade no verso.
+                  </p>
+                </div>
+              </div>
+            </main>
+
+            <footer className="flex h-[0.44cm] shrink-0 items-center justify-between border-t border-[#d7e2ed] bg-[#eef6f0] px-2.5">
+              <div className="flex items-center gap-1.5">
+                <BadgeCheck className="h-2.5 w-2.5 text-[#1f8a58]" />
+                <p className="text-[4.8px] font-black uppercase leading-none text-[#17324d]">Documento oficial municipal</p>
+              </div>
+              <p className="text-[4.7px] font-bold leading-none text-[#47617d]">Secretaria Municipal de Saude</p>
+            </footer>
           </div>
         </div>
 
-        {/* Verso da Carteirinha */}
-        <div className="w-[8.5cm] h-[5.4cm] rounded-lg border border-gray-300 bg-white shadow-2xl relative flex flex-col p-0 print:shadow-none print:border-gray-400 print:mx-auto overflow-hidden" style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}>
-          
-          {/* Magnetic Stripe Fake */}
-          <div className="w-full h-8 bg-gray-900 mt-3 mb-2"></div>
+        <div
+          className={`${CARD_SIZE} print-clean relative flex flex-col overflow-hidden border border-[#9fb3c8] bg-white shadow-lg print:mx-auto print:border-gray-400 print:shadow-none`}
+          style={{ WebkitPrintColorAdjust: 'exact', printColorAdjust: 'exact' }}
+        >
+          <div className="h-[0.72cm] bg-[linear-gradient(90deg,#17324d_0%,#155c9c_55%,#1f8a58_100%)] px-4 py-2 text-white">
+            <p className="text-[8px] font-black uppercase">Validacao digital da CIPF</p>
+            <p className="text-[5px] font-semibold uppercase opacity-85">Documento pessoal e intransferivel</p>
+          </div>
 
-          <div className="flex-1 flex flex-col px-4 pb-3">
-            <div className="flex justify-between items-start z-10 flex-1">
-              <div className="space-y-2.5 flex-1 pr-4">
+          <div className="grid flex-1 grid-cols-[1fr_2.3cm] gap-3 px-4 py-3">
+            <div className="flex flex-col justify-between">
+              <div className="space-y-2">
                 <div>
-                  <p className="text-[6px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">Registro CIPF</p>
-                  <p className="text-[10px] font-mono font-bold text-gray-900 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200 inline-block">{formatRegistro(registration.id)}</p>
+                  <p className="text-[5px] font-black uppercase text-[#47617d]">Registro CIPF</p>
+                  <p className="mt-0.5 inline-block border border-[#cbd8e3] bg-[#f6fafc] px-2 py-1 text-[10px] font-black text-[#17324d]">
+                    {formatRegistro(registration.id)}
+                  </p>
                 </div>
+
                 <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <p className="text-[6px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">Emissão</p>
-                    <p className="text-[8px] font-bold text-gray-800">{registration.issueDate}</p>
-                  </div>
-                  <div>
-                    <p className="text-[6px] text-gray-500 font-bold uppercase tracking-widest mb-0.5">Validade</p>
-                    <p className="text-[8px] font-bold text-gray-800">{registration.expiryDate}</p>
-                  </div>
+                  <Field label="Emissao" value={registration.issueDate} />
+                  <Field label="Validade" value={registration.expiryDate} />
                 </div>
-                <div className="mt-2">
-                  <p className="text-[5px] text-gray-500 uppercase tracking-widest mb-0.5">Assinatura Digital (Hash)</p>
-                  <p className="text-[6px] font-mono font-bold tracking-widest text-gray-700 break-all">{registration.visualSignature || '------'}</p>
+
+                <div className="border border-[#d7e2ed] bg-[#f8fbfd] p-2">
+                  <p className="text-[5px] font-black uppercase text-[#47617d]">Assinatura visual</p>
+                  <p className="mt-1 break-all font-mono text-[6.5px] font-black tracking-wide text-[#17324d]">
+                    {registration.visualSignature || '------'}
+                  </p>
                 </div>
               </div>
 
-              <div className="flex flex-col items-end justify-start pt-1">
-                <div className="p-1.5 bg-white border-2 border-gray-200 rounded-lg shadow-sm">
-                  <QRCodeSVG 
-                    value={validationUrl} 
-                    size={60}
-                    level="Q"
-                    className="text-gray-900"
-                    includeMargin={false}
-                  />
-                </div>
-                <div className="text-center mt-1.5 w-full">
-                  <p className="text-[5px] text-gray-500 uppercase tracking-widest font-bold">Validar Autenticidade</p>
-                </div>
+              <div className="border-l-4 border-[#f2c94c] bg-[#fff8dc] p-2">
+                <p className="flex items-start gap-1 text-[6px] font-bold leading-[1.35] text-[#4a3a08]">
+                  <ShieldCheck className="mt-0.5 h-2.5 w-2.5 shrink-0" />
+                  Apresente esta carteira para identificacao e validacao de prioridade, conforme legislacao municipal vigente.
+                </p>
               </div>
             </div>
-            
-            <div className="text-[6px] text-gray-600 text-justify leading-[1.5] mt-2 z-10 bg-gray-50 p-1.5 rounded border border-gray-100">
-              <span className="font-bold text-gray-800">ATENÇÃO:</span> Esta carteira é de uso pessoal e intransferível, válida em todo o território municipal. 
-              Garante atendimento prioritário em órgãos públicos, empresas públicas, empresas concessionárias 
-              de serviços públicos e empresas privadas, conforme Lei Municipal nº 2.690/2026. Em caso de perda ou roubo, comunicar imediatamente à Secretaria de Saúde.
-            </div>
 
-            {/* Fake Barcode at bottom */}
-            <div className="mt-2 w-full h-4 flex items-center justify-center opacity-40">
-              <div className="w-full h-full" style={{ backgroundImage: 'repeating-linear-gradient(to right, #000, #000 1px, transparent 1px, transparent 3px, #000 3px, #000 4px, transparent 4px, transparent 5px, #000 5px, #000 7px, transparent 7px, transparent 8px)' }}></div>
+            <div className="flex flex-col items-center justify-center border border-[#cbd8e3] bg-[#f8fbfd] p-1.5">
+              <div className="mb-1 flex items-center gap-1 text-[5px] font-black uppercase text-[#17324d]">
+                <QrCode className="h-2.5 w-2.5 text-[#155c9c]" />
+                QR oficial
+              </div>
+              <div className="border border-[#d7e2ed] bg-white p-1.5">
+                <QRCodeSVG value={validationUrl} size={74} level="Q" includeMargin={false} />
+              </div>
+              <p className="mt-2 text-center text-[5px] font-black uppercase leading-tight text-[#47617d]">
+                Validar
+                <br />
+                autenticidade
+              </p>
             </div>
+          </div>
+
+          <div className="grid h-[0.18cm] grid-cols-3">
+            <div className="bg-[#155c9c]" />
+            <div className="bg-[#1f8a58]" />
+            <div className="bg-[#f2c94c]" />
           </div>
         </div>
       </div>

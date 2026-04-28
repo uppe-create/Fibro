@@ -2,6 +2,9 @@ node_modules/
 build/
 dist/
 coverage/
+.firebase/
+.fluentflyout-data/
+devserver.*
 .DS_Store
 *.log
 .env*
