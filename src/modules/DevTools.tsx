@@ -4,12 +4,19 @@ import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 import { useAppStore } from '@/store/useAppStore';
 import { hasPermission } from '@/lib/permissions';
 import { Loader2, Bug } from 'lucide-react';
+import { generateSecureToken, getSafeErrorMessage } from '@/lib/utils';
+
+const ALLOW_DEV_TOOLS = !Boolean((import.meta as any).env?.PROD) && String((import.meta as any).env?.VITE_ALLOW_DEV_TOOLS || '') === 'true';
 
 export function DevTools() {
   const [loading, setLoading] = useState(false);
   const { currentUser, fetchRegistrations } = useAppStore();
 
   const generateFakeUsers = async () => {
+    if (!ALLOW_DEV_TOOLS) {
+      alert('DevTools desativado. Defina VITE_ALLOW_DEV_TOOLS=true apenas em ambiente local de teste.');
+      return;
+    }
     if (!hasPermission(currentUser, 'useDevTools')) {
       alert('Apenas administradores podem gerar dados falsos.');
       return;
@@ -29,7 +36,7 @@ export function DevTools() {
         const issueDate = new Date();
         const expiryDate = new Date();
         expiryDate.setFullYear(expiryDate.getFullYear() + 2);
-        const visualSignature = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const visualSignature = generateSecureToken(24);
 
         const birthYear = Math.floor(Math.random() * (2005 - 1950 + 1)) + 1950;
         const birthMonth = Math.floor(Math.random() * 12) + 1;
@@ -59,7 +66,7 @@ export function DevTools() {
             photoUrl: `https://picsum.photos/seed/${Math.random()}/300/400`,
             issueDate: issueDate.toLocaleDateString('pt-BR'),
             expiryDate: expiryDate.toLocaleDateString('pt-BR'),
-            status: 'active',
+            status: 'under_review',
             visualSignature,
             checksum: 'fake-checksum',
             userId: currentUser?.id || 'admin'
@@ -74,7 +81,7 @@ export function DevTools() {
         const { error: indexError } = await supabase.from('registration_index').upsert({
           cpf,
           registration_id: inserted.id,
-          status: 'active',
+          status: 'under_review',
           updated_at: new Date().toISOString()
         });
         if (indexError) throw new Error(indexError.message);
@@ -85,7 +92,7 @@ export function DevTools() {
           cpfMasked: '***.***.***-**',
           issueDate: issueDate.toLocaleDateString('pt-BR'),
           expiryDate: expiryDate.toLocaleDateString('pt-BR'),
-          status: 'active',
+          status: 'under_review',
           visualSignature,
           checksum: 'fake-checksum'
         });
@@ -93,14 +100,14 @@ export function DevTools() {
       }
 
       await fetchRegistrations();
-      alert('5 usuarios falsos gerados com sucesso!');
+      alert('5 cadastros falsos gerados em analise.');
     } catch (error: any) {
       console.error(error);
       if (error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache')) {
         alert('Supabase sem schema pronto para o app. Rode o arquivo supabase-schema.sql no SQL Editor do projeto.');
         return;
       }
-      alert(`Erro ao gerar usuarios falsos: ${error?.message || 'erro desconhecido'}`);
+      alert(getSafeErrorMessage(error, 'Erro ao gerar usuarios falsos. Confira se o banco de teste esta configurado.'));
     } finally {
       setLoading(false);
     }
@@ -122,11 +129,11 @@ export function DevTools() {
         <div className="bg-red-50/50 border border-red-100 rounded-2xl p-6 mb-8">
           <h3 className="font-medium text-red-800 mb-2">Gerador de Dados Falsos</h3>
           <p className="text-sm text-red-600/80 mb-6">
-            Isso cria 5 registros aleatorios para testar dashboard, filtros e graficos.
+            Isso cria 5 registros aleatorios em analise para testar dashboard, filtros e graficos. Requer VITE_ALLOW_DEV_TOOLS=true.
           </p>
           <Button
             onClick={generateFakeUsers}
-            disabled={loading}
+            disabled={loading || !ALLOW_DEV_TOOLS}
             className="bg-red-600 hover:bg-red-700 text-white rounded-xl h-12 px-6"
           >
             {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Bug className="w-4 h-4 mr-2" />}

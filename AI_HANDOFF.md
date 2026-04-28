@@ -25,6 +25,8 @@ Fluxo principal:
 - Supabase Auth esta preparado por `VITE_AUTH_MODE="supabase"`, mas nao deve ser ligado sem criar usuarios/perfis antes.
 - RLS restritiva ainda nao deve ser aplicada no banco vivo sem testar Auth/perfis.
 - Telas e bibliotecas pesadas sao carregadas sob demanda com `React.lazy` e `import()`.
+- Rascunho sensivel fica desativado por padrao; `VITE_ENABLE_SENSITIVE_DRAFTS="true"` so deve ser usado em teste controlado.
+- DevTools fica desativado por padrao; `VITE_ALLOW_DEV_TOOLS="true"` so deve apontar para banco descartavel.
 
 ## Arquivos Principais
 
@@ -85,6 +87,8 @@ Tabelas principais:
 - Selo "Pronto para imprimir" aparece quando o cadastro esta `approved` e sem pendencias documentais.
 - Checklist documental usa `getDocumentIssues`.
 - Fila operacional destaca cadastros `under_review` e `approved`.
+- Assinatura visual usa token forte com `crypto.getRandomValues()`.
+- Erros exibidos ao usuario devem passar por `getSafeErrorMessage`.
 
 ## Papeis e Permissoes
 
@@ -106,6 +110,13 @@ Antes de uso real:
 4. Testar `VITE_AUTH_MODE="supabase"` localmente.
 5. Aplicar RLS de producao apenas depois dos testes.
 6. Testar cada perfil com dados ficticios.
+
+Riscos conhecidos enquanto `VITE_AUTH_MODE="local"`:
+
+- Credenciais/hash em frontend nao sao protecao real.
+- Sessao local pode ser manipulada via DevTools.
+- Lockout local pode ser apagado pelo usuario.
+- RLS aberta para `anon` nao protege dados reais.
 
 ## Padrao de Edicao Recomendado
 

@@ -43,6 +43,8 @@ Aplicacao web para cadastro, analise, aprovacao, emissao, impressao e validacao 
    VITE_SUPABASE_ANON_KEY="SUA_CHAVE_PUBLICAVEL"
    VITE_APP_URL="http://localhost:5173"
    VITE_AUTH_MODE="local"
+   VITE_ENABLE_SENSITIVE_DRAFTS="false"
+   VITE_ALLOW_DEV_TOOLS="false"
    ```
 
 3. Inicie o app:
@@ -85,5 +87,6 @@ npm.cmd audit --omit=dev
 - `VITE_SUPABASE_ANON_KEY` e publica por natureza em app frontend; a protecao real deve vir de RLS, Supabase Auth ou backend confiavel.
 - O login local e adequado para MVP/testes controlados, mas nao substitui Auth/RLS em uso real com dados sensiveis.
 - Para testar Supabase Auth, crie usuarios/perfis no Supabase, aplique/adapte `supabase-auth-rls-prep.sql` e altere `VITE_AUTH_MODE` para `supabase`.
+- Rascunhos com dados sensiveis e DevTools ficam desativados por padrao por seguranca.
 - A exportacao Excel nativa foi removida junto com `xlsx`; use CSV compativel com Excel ou PDF.
 - Leia `SECURITY.md` e `AI_HANDOFF.md` antes de alterar regras de permissao, validacao publica, workflow ou banco.

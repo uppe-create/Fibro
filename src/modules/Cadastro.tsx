@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store/useAppStore';
-import { formatCNS, formatCPF, formatDate, formatPhone } from '@/lib/utils';
+import { formatCNS, formatCPF, formatDate, formatPhone, generateSecureToken, getSafeErrorMessage } from '@/lib/utils';
 import { getAgeFromBRDate } from '@/lib/date';
 import { AlertCircle, CheckCircle2, Loader2, UploadCloud, X, File as FileIcon, Eye } from 'lucide-react';
 import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
@@ -255,7 +255,7 @@ export function Cadastro() {
   }, [currentUser, fetchRegistrations]);
 
   useEffect(() => {
-    const rawDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
+    const rawDraft = sessionStorage.getItem(DRAFT_STORAGE_KEY);
     if (!rawDraft) return;
     try {
       const parsed = JSON.parse(rawDraft) as Partial<Record<keyof FormData, string>>;
@@ -263,12 +263,14 @@ export function Cadastro() {
       setDraftRestored(true);
       setDraftSavedAt(Date.now());
     } catch {
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      sessionStorage.removeItem(DRAFT_STORAGE_KEY);
     }
   }, [reset]);
 
   useEffect(() => {
     if (registeredData) return;
+    const enableSensitiveDrafts = String((import.meta as any).env?.VITE_ENABLE_SENSITIVE_DRAFTS || '').toLowerCase() === 'true';
+    if (!enableSensitiveDrafts) return;
     const draft = {
       fullName: formValues.fullName || '',
       cpf: formValues.cpf || '',
@@ -290,14 +292,14 @@ export function Cadastro() {
     const hasDraftContent = Object.values(draft).some((value) => String(value || '').trim());
     if (!hasDraftContent) return;
     const timer = window.setTimeout(() => {
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
       setDraftSavedAt(Date.now());
     }, 500);
     return () => window.clearTimeout(timer);
   }, [formValues, registeredData]);
 
   const discardDraft = () => {
-    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    sessionStorage.removeItem(DRAFT_STORAGE_KEY);
     setDraftSavedAt(null);
     setDraftRestored(false);
     reset();
@@ -333,7 +335,7 @@ export function Cadastro() {
     if (isMinor()) warnings.push('Titular menor de idade: confira responsavel legal e documento.');
     if (!formValues.cns) warnings.push('Cartao SUS nao informado. O campo e opcional, mas confira se a Secretaria deseja registrar.');
     if (!documentFileValue?.[0] || !proofOfResidenceFileValue?.[0] || !medicalReportFileValue?.[0] || !photoFileValue?.[0]) {
-      warnings.push('Confira todos os anexos. Rascunhos recuperam campos de texto, mas nao recuperam arquivos selecionados.');
+      warnings.push('Confira todos os anexos antes de salvar.');
     }
     return warnings;
   }, [possibleDuplicates, formValues.cid, formValues.cns, documentFileValue, proofOfResidenceFileValue, medicalReportFileValue, photoFileValue, birthDateValue]);
@@ -500,7 +502,7 @@ export function Cadastro() {
       expiryDate.setFullYear(expiryDate.getFullYear() + 2);
       const issueDateStr = issueDate.toLocaleDateString('pt-BR');
       const expiryDateStr = expiryDate.toLocaleDateString('pt-BR');
-      const visualSignature = Math.random().toString(36).slice(2, 8).toUpperCase();
+      const visualSignature = generateSecureToken(24);
       const checksum = await generateChecksum(`${cpfClean}|${data.fullName}|${data.birthDate}|${issueDateStr}|${visualSignature}`);
       const registrationId = crypto.randomUUID();
 
@@ -577,7 +579,7 @@ export function Cadastro() {
 
       setUploadStep('Cadastro finalizado com sucesso.');
       setRegisteredData({ fullName: data.fullName, cpf: data.cpf, cns: cnsClean ? formatCNS(cnsClean) : undefined });
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      sessionStorage.removeItem(DRAFT_STORAGE_KEY);
       setDraftSavedAt(null);
       setDraftRestored(false);
       reset();
@@ -588,15 +590,7 @@ export function Cadastro() {
       console.error(error);
       setUploadStep('');
       await cleanupOrphanFiles(uploadedFileIds);
-      if (error?.message === 'CPF_DUPLICATE_ACTIVE') {
-        setSubmitError('CPF ja possui cadastro em andamento ou carteirinha existente. Use renovacao, segunda via ou cancelamento operacional.');
-        return;
-      }
-      if (error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache')) {
-        setSubmitError('Supabase sem schema pronto para o app. Rode o arquivo supabase-schema.sql no SQL Editor.');
-        return;
-      }
-      setSubmitError(`Erro ao enviar formulário: ${error?.message || 'erro desconhecido'}`);
+      setSubmitError(getSafeErrorMessage(error, 'Erro ao enviar formulario. Verifique os dados e tente novamente.'));
     }
   };
 
@@ -659,7 +653,7 @@ export function Cadastro() {
             <div>
               <p className="font-black">{draftRestored ? 'Rascunho recuperado automaticamente' : 'Rascunho salvo automaticamente'}</p>
               <p className="mt-1">
-                Campos de texto ficam salvos neste computador. Por segurança do navegador, arquivos anexados precisam ser selecionados novamente.
+                Rascunho temporario desta aba. Nao use em computadores compartilhados sem supervisao.
               </p>
             </div>
             <Button type="button" variant="outline" onClick={discardDraft} className="h-10 shrink-0 border-amber-300 bg-white">

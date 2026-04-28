@@ -28,6 +28,11 @@ Este projeto trabalha com dados pessoais e dados potencialmente sensiveis de sau
 - Dashboard tem checklist documental, fila operacional e selo "Pronto para imprimir".
 - Upload mostra pre-visualizacao, progresso e aviso para arquivo pesado.
 - App usa carregamento sob demanda de telas e bibliotecas pesadas, reduzindo o JavaScript inicial.
+- Assinatura visual passou a usar `crypto.getRandomValues()` com token maior.
+- Mensagens de erro exibidas ao usuario foram sanitizadas para nao vazar detalhes internos do banco.
+- Rascunho com dados sensiveis fica desativado por padrao; so volta se `VITE_ENABLE_SENSITIVE_DRAFTS="true"`.
+- DevTools de massa falsa fica desativado por padrao e exige `VITE_ALLOW_DEV_TOOLS="true"` em ambiente nao-producao.
+- Firebase Hosting recebeu headers basicos de seguranca: CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy e Permissions-Policy.
 
 ## Arquivos de Seguranca e Banco
 
@@ -65,8 +70,17 @@ Nunca coloque estes itens em `VITE_*`, README, SECURITY, AI_HANDOFF ou codigo ve
 4. Testar localmente com `VITE_AUTH_MODE="supabase"`.
 5. Confirmar que cada perfil acessa somente o que deveria.
 6. Adaptar e aplicar `supabase-hardening-production.sql`.
-7. Testar cadastro, edicao, aprovacao, emissao, impressao, dashboard, documentos, auditoria e validacao publica com dados ficticios.
-8. Remover qualquer credencial local de teste antes de uso oficial.
+7. Remover politicas MVP `to anon using (true)` do banco vivo.
+8. Testar cadastro, edicao, aprovacao, emissao, impressao, dashboard, documentos, auditoria e validacao publica com dados ficticios.
+9. Remover qualquer credencial local de teste antes de uso oficial.
+
+## Riscos Ainda Nao Resolvidos Sem Backend/Auth
+
+- Login local em frontend nao e seguranca real, mesmo com hash.
+- Sessao em `sessionStorage` pode ser manipulada no DevTools enquanto o app usar login local.
+- Lockout em `localStorage` e apenas protecao de UX, nao rate limit real.
+- IP real nao pode ser auditado com confianca sem Edge Function/backend.
+- RLS aberta para `anon` precisa ser substituida por politicas autenticadas antes de dados reais.
 
 ## Regras de Ouro para Futuras Alteracoes
 

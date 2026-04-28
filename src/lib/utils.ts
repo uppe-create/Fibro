@@ -42,6 +42,32 @@ export function formatCNS(value: string) {
     .replace(/( \d{4})\d+?$/, "$1");
 }
 
+export function generateSecureToken(length = 24): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+}
+
+export function getSafeErrorMessage(error: unknown, fallback = "Nao foi possivel concluir a operacao. Tente novamente."): string {
+  const message = String((error as any)?.message || "");
+  const code = String((error as any)?.code || "");
+
+  if (message === "CPF_DUPLICATE_ACTIVE" || code === "23505") {
+    return "CPF ja possui cadastro em andamento ou carteirinha existente.";
+  }
+
+  if (code === "PGRST205" || message.includes("schema cache")) {
+    return "Supabase sem schema pronto para o app. Rode o arquivo supabase-schema.sql no SQL Editor.";
+  }
+
+  if (message.toLowerCase().includes("permission") || message.toLowerCase().includes("rls")) {
+    return "Sem permissao para executar esta acao. Verifique o perfil de acesso.";
+  }
+
+  return fallback;
+}
+
 export function validateCPF(cpf: string): boolean {
   cpf = cpf.replace(/[^\d]+/g, '');
   if (cpf.length !== 11 || /^(\d)\1{10}$/.test(cpf)) return false;
