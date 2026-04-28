@@ -1,45 +1,78 @@
-# Segurança do App
+# Seguranca do App
 
-## O que ja foi melhorado
+Este projeto trabalha com dados pessoais e dados potencialmente sensiveis de saude. A versao atual e um MVP operacional com melhorias de seguranca no frontend, mas a seguranca definitiva deve ser concluida com Supabase Auth, RLS e/ou backend confiavel antes de uso amplo com dados reais.
 
-- A validacao publica usa a funcao `validate_cipf(id, assinatura)` quando disponivel, retornando dados apenas se a assinatura digital bater.
-- A tela publica exibe somente dados minimos: nome, CPF mascarado, emissao, validade, status e assinatura visual.
-- A validacao publica so considera documento valido quando o status e `issued` (ou legado `active`) e a validade nao venceu.
-- Novos cadastros entram como `under_review`; somente administrador pode emitir/imprimir/baixar PNG.
-- Atendente pode aprovar e renovar, mas nao imprimir. Consulta nao acessa dashboard, cadastro nem impressao.
-- O alternador de usuario de teste fica oculto em build de producao.
-- `.env.local` fica ignorado pelo Git e `.env.example` nao deve conter senhas reais, hashes reais ou chaves secretas.
-- O arquivo `supabase-hardening-production.sql` deixa pronto um modelo de RLS mais restritivo para producao.
-- O arquivo `supabase-workflow-status-migration.sql` migra status antigos sem aplicar RLS restritiva.
-- A biblioteca `xlsx` foi removida; relatorios administrativos usam CSV compativel com Excel e PDF.
-- A exclusao operacional foi trocada por arquivamento seguro usando status `cancelled`, preservando auditoria e recuperabilidade.
-- O app agora usa carregamento sob demanda de modulos e bibliotecas pesadas, reduzindo o JavaScript inicial exposto ao usuario.
-- `VITE_AUTH_MODE="supabase"` foi preparado para testes futuros com Supabase Auth sem desligar o login local atual.
-- `supabase-auth-rls-prep.sql` cria a base de perfis por usuario para migrar permissoes ao banco.
+## Estado Atual
 
-## Ponto importante sobre chaves
+- O banco ativo e Supabase.
+- Firebase e usado somente para Hosting do site estatico.
+- O login padrao ainda e local por variaveis de ambiente, com hash de senha, bloqueio por tentativas e expiracao de sessao.
+- `VITE_AUTH_MODE="supabase"` ja existe para testes futuros com Supabase Auth.
+- A validacao publica deve usar `validate_cipf(id, assinatura)` quando a RPC estiver aplicada.
+- A tela publica nao deve consultar `registrations`; ela deve consultar apenas `public_validations` ou RPC segura.
 
-`VITE_SUPABASE_ANON_KEY` e outras variaveis `VITE_*` ficam publicas no JavaScript final do site. Isso e esperado em apps frontend. O segredo real nao deve ser uma chave no navegador, e sim as regras RLS do Supabase.
+## Melhorias Ja Aplicadas
 
-Nunca coloque `sb_secret`, service role key, senha do banco ou chaves administrativas em variaveis `VITE_*`.
+- Validacao publica retorna somente dados minimos: nome, CPF mascarado, emissao, validade, status e assinatura visual.
+- Validacao publica positiva apenas para status `issued` ou legado `active`, desde que a validade nao esteja vencida.
+- Novos cadastros entram como `under_review`, sem liberar documento valido publicamente.
+- Atendente pode cadastrar, editar, aprovar e renovar, mas nao imprimir.
+- Somente administrador pode emitir, imprimir, baixar PNG, cancelar, limpar banco e usar ferramentas dev.
+- Perfil consulta nao acessa dashboard, cadastro nem impressao.
+- Alternador de usuario de teste fica oculto em build de producao.
+- `.env.local` fica ignorado pelo Git.
+- `.env.example` nao deve conter senhas reais, hashes reais ou chaves secretas.
+- `xlsx` foi removido; relatorios usam CSV, CSV compativel com Excel e PDF.
+- Exclusao operacional virou arquivamento seguro com status `cancelled`.
+- Acoes sensiveis registram auditoria quando aplicavel.
+- Dashboard tem checklist documental, fila operacional e selo "Pronto para imprimir".
+- Upload mostra pre-visualizacao, progresso e aviso para arquivo pesado.
+- App usa carregamento sob demanda de telas e bibliotecas pesadas, reduzindo o JavaScript inicial.
 
-Firebase e usado somente para Hosting neste projeto. Nao manter regras ou SDK
-de Firestore se o banco ativo continuar sendo Supabase.
+## Arquivos de Seguranca e Banco
 
-## Antes de uso real
+- `supabase-schema.sql`: schema atual do MVP.
+- `supabase-workflow-status-migration.sql`: migra status antigos para o fluxo atual.
+- `supabase-auth-rls-prep.sql`: prepara tabela de perfis para Supabase Auth.
+- `supabase-hardening-production.sql`: modelo de RLS mais restritivo para producao real.
 
-1. Migrar login local para Supabase Auth, Edge Function ou backend confiavel.
-2. Criar usuarios com papeis reais: `admin`, `attendant`, `viewer`.
-3. Aplicar/adaptar `supabase-auth-rls-prep.sql` e preencher `app_profiles`.
-4. Testar `VITE_AUTH_MODE="supabase"` em ambiente local com dados ficticios.
-5. Adicionar o papel em custom claims/JWT ou manter tabela de perfis protegida.
-6. Aplicar `supabase-hardening-production.sql`.
-7. Testar cadastro, edicao, impressao, dashboard e validacao publica com cada perfil.
+## Ponto Importante Sobre Chaves
 
-## Fluxo operacional atual
+`VITE_SUPABASE_ANON_KEY` e qualquer variavel `VITE_*` ficam publicas no JavaScript final do site. Isso e esperado em frontend. O segredo real nao deve estar no navegador.
+
+Nunca coloque estes itens em `VITE_*`, README, SECURITY, AI_HANDOFF ou codigo versionado:
+
+- `sb_secret`.
+- service role key.
+- senha do banco.
+- senha de usuario real.
+- dados reais de pacientes.
+- tokens administrativos.
+
+## Fluxo Operacional Atual
 
 - `under_review`: cadastro recebido, ainda nao valido publicamente.
 - `approved`: aprovado por admin/atendente, aguardando emissao por administrador.
 - `issued`: emitido por administrador, pode validar publicamente enquanto nao vencido.
 - `expired`: vencido por validade.
-- `cancelled`: cancelado por administrador com motivo registrado na auditoria.
+- `cancelled`: cancelado/arquivado por administrador com motivo registrado quando aplicavel.
+
+## Antes de Uso Real com Dados Sensiveis
+
+1. Criar usuarios reais no Supabase Auth.
+2. Aplicar/adaptar `supabase-auth-rls-prep.sql`.
+3. Preencher `app_profiles` com `admin`, `attendant` e `viewer`.
+4. Testar localmente com `VITE_AUTH_MODE="supabase"`.
+5. Confirmar que cada perfil acessa somente o que deveria.
+6. Adaptar e aplicar `supabase-hardening-production.sql`.
+7. Testar cadastro, edicao, aprovacao, emissao, impressao, dashboard, documentos, auditoria e validacao publica com dados ficticios.
+8. Remover qualquer credencial local de teste antes de uso oficial.
+
+## Regras de Ouro para Futuras Alteracoes
+
+- Nunca deixar a tela publica ler `registrations`.
+- Nunca liberar impressao para atendente ou consulta.
+- Nunca salvar segredos em arquivos versionados.
+- Nunca aplicar RLS restritiva no banco vivo sem testar Auth/perfis antes.
+- Sempre registrar auditoria para acao sensivel.
+- Sempre validar build e permissao antes de publicar.
