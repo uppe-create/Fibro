@@ -1,138 +1,32 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useForm, type FieldError, type UseFormRegister } from 'react-hook-form';
-import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useAppStore } from '@/store/useAppStore';
-import { formatCNS, formatCPF, formatDate, formatPhone, validateCPF } from '@/lib/utils';
-import { getAgeFromBRDate, parseBRDate } from '@/lib/date';
+import { formatCNS, formatCPF, formatDate, formatPhone } from '@/lib/utils';
+import { getAgeFromBRDate } from '@/lib/date';
 import { AlertCircle, CheckCircle2, Loader2, UploadCloud, X, File as FileIcon, Eye } from 'lucide-react';
 import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 import { logAuditEvent } from '@/lib/audit';
 import { hasPermission } from '@/lib/permissions';
 import { isCpfBlockedByStatus } from '@/lib/registration-status';
-
-const MAX_FILE_SIZE = 5 * 1024 * 1024;
-const CHUNK_SIZE = 700000;
-const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-const ACCEPTED_DOC_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
-const CID_DEFAULT = 'M79.7';
-const DRAFT_STORAGE_KEY = 'cipf_registration_draft_v1';
-
-type UploadField = 'documentFile' | 'proofOfResidenceFile' | 'medicalReportFile' | 'photoFile';
-
-const INITIAL_UPLOAD_PROGRESS: Record<UploadField, number> = {
-  documentFile: 0,
-  proofOfResidenceFile: 0,
-  medicalReportFile: 0,
-  photoFile: 0
-};
-
-const normalizeText = (value: string) => value.toUpperCase().replace(/\s+/g, ' ').trim();
-const normalizeLookupText = (value = '') =>
-  value
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toUpperCase();
-
-// Shared validation for required uploads. Uploaded files are converted to
-// Base64 and stored in Supabase chunks to avoid oversized single-row payloads.
-const makeFileSchema = (label: string, acceptedTypes: string[]) =>
-  z
-    .any()
-    .refine((files) => files && files.length === 1, `${label} é obrigatório.`)
-    .refine((files) => !files?.[0] || files[0].size <= MAX_FILE_SIZE, 'O arquivo deve ter no máximo 5MB')
-    .refine(
-      (files) => !files?.[0] || acceptedTypes.includes(files[0].type),
-      `Formato inválido para ${label.toLowerCase()}.`
-    );
-
-// Main business-rules gate before any Supabase write. Keep user-facing
-// validation messages here when adding mandatory fields.
-const schema = z
-  .object({
-    fullName: z.string().min(3, 'Nome deve ter no mínimo 3 caracteres').transform(normalizeText),
-    cpf: z
-      .string()
-      .min(14, 'CPF inválido')
-      .refine((value) => validateCPF(value), 'CPF inválido matematicamente'),
-    cns: z
-      .string()
-      .optional()
-      .transform((value) => (value ? value.replace(/\D/g, '') : ''))
-      .refine((value) => !value || value.length === 15, 'Cartao SUS deve ter 15 digitos'),
-    phone: z.string().min(14, 'Telefone inválido'),
-    birthDate: z
-      .string()
-      .min(10, 'Data inválida')
-      .refine((value) => {
-        const date = parseBRDate(value);
-        if (!date) return false;
-        const now = new Date();
-        const age = getAgeFromBRDate(value, now);
-        return date <= now && age !== null && age >= 0 && age <= 120;
-      }, 'Data de nascimento inválida (futura ou idade > 120 anos).'),
-    legalGuardian: z.string().optional().transform((value) => (value ? normalizeText(value) : undefined)),
-    cep: z.string().min(9, 'CEP inválido'),
-    logradouro: z.string().min(3, 'Logradouro obrigatório').transform(normalizeText),
-    bairro: z.string().min(2, 'Bairro obrigatório').transform(normalizeText),
-    cidade: z.string().min(2, 'Cidade obrigatória').transform(normalizeText),
-    estado: z.string().length(2, 'Estado (UF) deve ter 2 letras').transform((value) => value.toUpperCase()),
-    documentFile: makeFileSchema('Documento oficial', ACCEPTED_DOC_TYPES),
-    proofOfResidenceFile: makeFileSchema('Comprovante de residência', ACCEPTED_DOC_TYPES),
-    proofOfResidenceDate: z
-      .string()
-      .min(10, 'Data do comprovante inválida')
-      .refine((value) => {
-        const date = parseBRDate(value);
-        if (!date) return false;
-        const now = new Date();
-        const ninetyDaysAgo = new Date(now);
-        ninetyDaysAgo.setHours(0, 0, 0, 0);
-        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-        return date <= now && date >= ninetyDaysAgo;
-      }, 'O comprovante não pode ter mais de 90 dias.'),
-    medicalReportFile: makeFileSchema('Laudo médico', ACCEPTED_DOC_TYPES),
-    medicalReportDate: z
-      .string()
-      .min(10, 'Data do laudo inválida')
-      .refine((value) => {
-        const date = parseBRDate(value);
-        if (!date) return false;
-        const now = new Date();
-        const sixMonthsAgo = new Date(now);
-        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-        return date <= now && date >= sixMonthsAgo;
-      }, 'O laudo não pode ter mais de 6 meses de emissão.'),
-    cid: z.string().min(3, 'CID obrigatório').transform((value) => value.toUpperCase()),
-    justificativaCid: z.string().optional(),
-    crm: z.string().min(4, 'CRM inválido'),
-    photoFile: makeFileSchema('Foto', ACCEPTED_IMAGE_TYPES)
-  })
-  .superRefine((data, ctx) => {
-    if (data.cid !== CID_DEFAULT && (!data.justificativaCid || data.justificativaCid.trim().length < 10)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Justificativa médica é obrigatória e deve ter pelo menos 10 caracteres quando o CID não for M79.7',
-        path: ['justificativaCid']
-      });
-    }
-
-    const age = getAgeFromBRDate(data.birthDate);
-    if (age !== null && age < 18 && (!data.legalGuardian || data.legalGuardian.trim().length < 3)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'Nome do responsável legal é obrigatório para menores de 18 anos',
-        path: ['legalGuardian']
-      });
-    }
-  });
-
-type FormData = z.infer<typeof schema>;
+import {
+  CHUNK_SIZE,
+  CID_DEFAULT,
+  DRAFT_STORAGE_KEY,
+  INITIAL_UPLOAD_PROGRESS,
+  cadastroSchema,
+  cropImageTo3x4DataUri,
+  fileToDataUri,
+  formatFileSize,
+  generateChecksum,
+  normalizeLookupText,
+  normalizeText,
+  type FormData,
+  type UploadField
+} from '@/lib/cadastro-utils';
 
 type FileUploadFieldProps = {
   id: string;
@@ -146,8 +40,6 @@ type FileUploadFieldProps = {
   progress: number;
   isSubmitting: boolean;
 };
-
-const formatFileSize = (size = 0) => `${(size / 1024 / 1024).toFixed(2)} MB`;
 
 function FileUploadField({
   id,
@@ -278,63 +170,6 @@ function maskCpf(cpf: string) {
   return cpf.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '***.$2.***-**');
 }
 
-async function fileToDataUri(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Falha ao ler arquivo.'));
-  });
-}
-
-async function cropImageTo3x4DataUri(file: File): Promise<string> {
-  const imageDataUri = await fileToDataUri(file);
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      const targetRatio = 3 / 4;
-      const sourceRatio = img.width / img.height;
-      let cropWidth = img.width;
-      let cropHeight = img.height;
-      let offsetX = 0;
-      let offsetY = 0;
-
-      if (sourceRatio > targetRatio) {
-        cropWidth = img.height * targetRatio;
-        offsetX = (img.width - cropWidth) / 2;
-      } else {
-        cropHeight = img.width / targetRatio;
-        offsetY = (img.height - cropHeight) / 2;
-      }
-
-      canvas.width = 300;
-      canvas.height = 400;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return reject(new Error('Falha ao processar foto.'));
-      ctx.drawImage(img, offsetX, offsetY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.78));
-    };
-    img.onerror = () => reject(new Error('Falha ao carregar foto.'));
-    img.src = imageDataUri;
-  });
-}
-
-async function generateChecksum(data: string): Promise<string> {
-  if (!crypto?.subtle) {
-    let hash = 0;
-    for (let i = 0; i < data.length; i++) {
-      hash = (hash << 5) - hash + data.charCodeAt(i);
-      hash |= 0;
-    }
-    return Math.abs(hash).toString(16).padStart(8, '0');
-  }
-  const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data));
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
-}
-
 export function Cadastro() {
   const [registeredData, setRegisteredData] = useState<{ fullName: string; cpf: string; cns?: string } | null>(null);
   const [uploadStep, setUploadStep] = useState('');
@@ -354,7 +189,7 @@ export function Cadastro() {
     watch,
     trigger
   } = useForm<FormData>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(cadastroSchema),
     mode: 'onChange'
   });
 

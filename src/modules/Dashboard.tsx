@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { CarteirinhaPreview } from '@/components/CarteirinhaPreview';
-import { getAgeBucket, getAgeFromBRDate, isExpiringInDays, parseBRDate } from '@/lib/date';
+import { parseBRDate } from '@/lib/date';
 import { loadCipfFileDataUri, openInNewTab } from '@/lib/cipf-files';
 import { logAuditEvent } from '@/lib/audit';
 import { hasPermission } from '@/lib/permissions';
@@ -42,9 +42,25 @@ import {
   getStatusLabel,
   isPrintableStatus,
   normalizeRegistrationStatus,
-  statusMatchesFilter,
   type RegistrationStatus
 } from '@/lib/registration-status';
+import {
+  buildAgeStats,
+  buildBairroStats,
+  buildEditForm,
+  buildStats,
+  datePlusYearsBR,
+  filterDashboardRegistrations,
+  getExpiryHighlight,
+  maskCpf,
+  normalizeForExport,
+  normalizeUpper,
+  todayBR,
+  toDigits,
+  type EditRegistrationForm,
+  type ReviewFilter,
+  type StatusFilter
+} from '@/lib/dashboard-utils';
 import jsPDF from 'jspdf';
 
 type TimelineEntry = {
@@ -54,130 +70,7 @@ type TimelineEntry = {
   reason?: string;
 };
 
-type EditRegistrationForm = {
-  fullName: string;
-  cns: string;
-  phone: string;
-  birthDate: string;
-  legalGuardian: string;
-  cep: string;
-  logradouro: string;
-  bairro: string;
-  cidade: string;
-  estado: string;
-  cid: string;
-  justificativaCid: string;
-  crm: string;
-  proofOfResidenceDate: string;
-  medicalReportDate: string;
-  issueDate: string;
-  expiryDate: string;
-  status: CIPFRegistration['status'];
-};
-
 const PRINT_REGISTRATION_STORAGE_KEY = 'cipf_print_registration_id';
-type StatusFilter = 'all' | RegistrationStatus;
-type ReviewFilter = 'all' | 'document_issues' | 'archived';
-
-// Dashboard is the administrative control center: list/filter records, edit
-// non-CPF fields, export reports, inspect history and start print preview.
-function toDigits(value: string): string {
-  return value.replace(/\D/g, '');
-}
-
-function maskCpf(cpf: string): string {
-  const digits = toDigits(cpf);
-  if (digits.length !== 11) return cpf;
-  return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '***.$2.***-**');
-}
-
-function normalizeForExport(reg: CIPFRegistration) {
-  return {
-    nome: reg.fullName,
-    cpf: toDigits(reg.cpf),
-    cartao_sus: toDigits(reg.cns || ''),
-    status: getStatusLabel(reg.status),
-    cid: reg.cid || '',
-    bairro: reg.bairro || '',
-    cidade: reg.cidade || '',
-    validade: reg.expiryDate,
-    emissao: reg.issueDate
-  };
-}
-
-function normalizeUpper(value: string): string {
-  return value.toUpperCase().replace(/\s+/g, ' ').trim();
-}
-
-function getExpiryHighlight(reg: CIPFRegistration) {
-  const normalizedStatus = normalizeRegistrationStatus(reg.status);
-  if (normalizedStatus === 'cancelled') return 'border-l-4 border-l-zinc-400 bg-zinc-50/60';
-  const expiry = parseBRDate(reg.expiryDate);
-  if (!expiry) return '';
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diffDays = Math.ceil((expiry.getTime() - today.getTime()) / 86400000);
-  if (diffDays < 0 || normalizedStatus === 'expired') return 'border-l-4 border-l-red-500 bg-red-50/40';
-  if (diffDays <= 30 && normalizedStatus === 'issued') return 'border-l-4 border-l-amber-400 bg-amber-50/40';
-  return '';
-}
-
-function daysSinceBRDate(value?: string): number | null {
-  const date = parseBRDate(value || '');
-  if (!date) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.floor((today.getTime() - date.getTime()) / 86400000);
-}
-
-function getDocumentIssues(reg: CIPFRegistration): string[] {
-  const issues: string[] = [];
-  if (!reg.documentFileId && !reg.documentUrl) issues.push('Documento oficial ausente');
-  if (!reg.proofOfResidenceFileId && !reg.proofOfResidenceUrl) issues.push('Comprovante ausente');
-  if (!reg.medicalReportFileId && !reg.medicalReportUrl) issues.push('Laudo medico ausente');
-  if (!reg.photoFileId && !reg.photoUrl) issues.push('Foto ausente');
-
-  const proofDays = daysSinceBRDate(reg.proofOfResidenceDate);
-  if (proofDays !== null && proofDays > 90) issues.push('Comprovante com mais de 90 dias');
-
-  const reportDays = daysSinceBRDate(reg.medicalReportDate);
-  if (reportDays !== null && reportDays > 183) issues.push('Laudo com mais de 6 meses');
-
-  return issues;
-}
-
-function todayBR() {
-  return new Date().toLocaleDateString('pt-BR');
-}
-
-function datePlusYearsBR(years: number) {
-  const date = new Date();
-  date.setFullYear(date.getFullYear() + years);
-  return date.toLocaleDateString('pt-BR');
-}
-
-function buildEditForm(reg: CIPFRegistration): EditRegistrationForm {
-  return {
-    fullName: reg.fullName || '',
-    cns: formatCNS(reg.cns || ''),
-    phone: reg.phone || '',
-    birthDate: reg.birthDate || '',
-    legalGuardian: reg.legalGuardian || '',
-    cep: reg.cep || '',
-    logradouro: reg.logradouro || '',
-    bairro: reg.bairro || '',
-    cidade: reg.cidade || '',
-    estado: reg.estado || '',
-    cid: reg.cid || '',
-    justificativaCid: reg.justificativaCid || '',
-    crm: reg.crm || '',
-    proofOfResidenceDate: reg.proofOfResidenceDate || '',
-    medicalReportDate: reg.medicalReportDate || '',
-    issueDate: reg.issueDate || '',
-    expiryDate: reg.expiryDate || '',
-    status: normalizeRegistrationStatus(reg.status)
-  };
-}
 
 export function Dashboard() {
   const { registrations, currentUser, fetchRegistrations } = useAppStore();
@@ -502,51 +395,17 @@ export function Dashboard() {
   );
 
   const filteredRegistrations = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    return registrations.filter((reg) => {
-      const normalizedStatus = normalizeRegistrationStatus(reg.status);
-      const nameMatch = reg.fullName.toLowerCase().includes(term);
-      const cpfMatch = toDigits(reg.cpf).includes(toDigits(term));
-      const cnsMatch = toDigits(reg.cns || '').includes(toDigits(term));
-      const cidMatch = (reg.cid || '').toLowerCase().includes(term);
-      const bairroMatch = (reg.bairro || '').toLowerCase().includes(term);
-      const matchesSearch = !term || nameMatch || cpfMatch || cnsMatch || cidMatch || bairroMatch;
-      const matchesCid = cidFilter === 'all' || (reg.cid || '') === cidFilter;
-      const matchesBairro = bairroFilter === 'all' || (reg.bairro || '') === bairroFilter;
-      const matchesStatus =
-        statusFilter === 'all'
-          ? normalizedStatus !== 'cancelled' || reviewFilter === 'archived'
-          : statusMatchesFilter(reg.status, statusFilter);
-      const matchesExpiry =
-        expiryFilter === 'all' || (normalizeRegistrationStatus(reg.status) === 'issued' && isExpiringInDays(reg.expiryDate, 30));
-      const matchesReview =
-        reviewFilter === 'all' ||
-        (reviewFilter === 'document_issues' && getDocumentIssues(reg).length > 0) ||
-        (reviewFilter === 'archived' && normalizedStatus === 'cancelled');
-      return matchesSearch && matchesCid && matchesBairro && matchesStatus && matchesExpiry && matchesReview;
+    return filterDashboardRegistrations(registrations, {
+      searchTerm,
+      cidFilter,
+      bairroFilter,
+      statusFilter,
+      expiryFilter,
+      reviewFilter
     });
   }, [registrations, searchTerm, cidFilter, bairroFilter, statusFilter, expiryFilter, reviewFilter]);
 
-  const stats = useMemo(
-    () => {
-      const byStatus = (status: RegistrationStatus) =>
-        registrations.filter((registration) => normalizeRegistrationStatus(registration.status) === status).length;
-      return {
-        total: registrations.length,
-        underReview: byStatus('under_review'),
-        approved: byStatus('approved'),
-        issued: byStatus('issued'),
-        expired: byStatus('expired'),
-        cancelled: byStatus('cancelled'),
-        documentIssues: registrations.filter((registration) => getDocumentIssues(registration).length > 0).length,
-        expiring30: registrations.filter(
-          (registration) => normalizeRegistrationStatus(registration.status) === 'issued' && isExpiringInDays(registration.expiryDate, 30)
-        ).length,
-        filtered: filteredRegistrations.length
-      };
-    },
-    [registrations, filteredRegistrations]
-  );
+  const stats = useMemo(() => buildStats(registrations, filteredRegistrations), [registrations, filteredRegistrations]);
 
   const statCards = [
     { label: 'Em analise', value: stats.underReview, icon: Clock, tone: 'bg-amber-50 text-amber-700' },
@@ -558,27 +417,9 @@ export function Dashboard() {
     { label: 'Resultado filtrado', value: stats.filtered, icon: Filter, tone: 'bg-[#f3f6f9] text-[#17324d]' }
   ];
 
-  const bairroStats = useMemo(
-    () =>
-      filteredRegistrations.reduce((acc, reg) => {
-        const bairro = reg.bairro || 'Nao Informado';
-        acc[bairro] = (acc[bairro] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>),
-    [filteredRegistrations]
-  );
+  const bairroStats = useMemo(() => buildBairroStats(filteredRegistrations), [filteredRegistrations]);
 
-  const ageStats = useMemo(
-    () =>
-      filteredRegistrations.reduce((acc, reg) => {
-        const age = getAgeFromBRDate(reg.birthDate);
-        if (age === null) return acc;
-        const bucket = getAgeBucket(age);
-        acc[bucket] = (acc[bucket] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>),
-    [filteredRegistrations]
-  );
+  const ageStats = useMemo(() => buildAgeStats(filteredRegistrations), [filteredRegistrations]);
 
   const handleViewMedicalDoc = async (reg: CIPFRegistration) => {
     if (!canViewDocuments) {
