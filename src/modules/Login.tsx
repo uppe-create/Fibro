@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Building2, Loader2, LockKeyhole, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { Loader2, LockKeyhole, ShieldAlert, User } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { getSessionSecurityConfig, useAppStore } from '@/store/useAppStore';
 import prefeituraLogo from '@/assets/prefeitura-logo.png';
@@ -29,18 +29,10 @@ export function Login() {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-2xl border border-[#d9e1ea] bg-[#f7fafc] p-4 text-center">
-        <div className="mx-auto mb-3 flex h-16 w-32 items-center justify-center bg-white px-3 shadow-sm">
-          <img src={prefeituraLogo} alt="Prefeitura de Ipero" className="max-h-12 w-auto object-contain" />
-        </div>
-        <div className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-[#b9d7c7] bg-[#edf7f1] px-3 py-1 text-[11px] font-black uppercase tracking-wide text-[#166534]">
-          <ShieldCheck className="h-3.5 w-3.5" />
-          Portal restrito oficial
-        </div>
-        <h3 className="text-lg font-black text-[#17324d]">Area interna da Secretaria</h3>
-        <p className="mt-1 text-xs leading-5 text-[#617184]">
-          Acesso para administradores, atendentes e perfis de consulta autorizados.
-        </p>
+      <div className="text-center">
+        <img src={prefeituraLogo} alt="Prefeitura de Ipero" className="mx-auto h-14 w-auto object-contain" />
+        <h2 className="mt-5 text-xl font-black text-[#17324d]">Acesso administrativo</h2>
+        <p className="mt-1 text-sm text-[#617184]">Entre para gerenciar a Carteirinha de Fibromialgia.</p>
       </div>
 
       {error && (
@@ -54,13 +46,13 @@ export function Login() {
 
       <form onSubmit={handleLogin} className="space-y-3">
         <label className="relative block">
-          <Building2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#617184]" />
+          <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#617184]" />
           <Input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="Usuario"
             autoComplete="username"
-            className="h-12 rounded-xl bg-white pl-10"
+            className="h-12 rounded-xl border-[#d9e1ea] bg-white pl-10"
             required
           />
         </label>
@@ -72,24 +64,24 @@ export function Login() {
             placeholder="Senha"
             type="password"
             autoComplete="current-password"
-            className="h-12 rounded-xl bg-white pl-10"
+            className="h-12 rounded-xl border-[#d9e1ea] bg-white pl-10"
             required
           />
         </label>
-        <Button type="submit" disabled={loading} className="official-button h-12 w-full rounded-xl font-bold transition-all active:scale-[0.98]">
+        <Button type="submit" disabled={loading} className="h-12 w-full rounded-xl bg-[#17324d] font-bold text-white transition-all hover:bg-[#10263b] active:scale-[0.98]">
           {loading ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               Entrando...
             </>
           ) : (
-            'Entrar com credencial autorizada'
+            'Entrar'
           )}
         </Button>
       </form>
 
-      <div className="rounded-xl border border-[#d9e1ea] bg-white px-3 py-2 text-center text-xs text-[#5E6B7A]">
-        Selo de seguranca: bloqueio apos {loginMaxAttempts} tentativas e pausa de {lockoutMinutes} min.
+      <div className="text-center text-xs text-[#617184]">
+        Bloqueio apos {loginMaxAttempts} tentativas. Pausa de {lockoutMinutes} min.
       </div>
     </div>
   );

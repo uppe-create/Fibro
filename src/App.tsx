@@ -74,17 +74,8 @@ const ProtectedRoute = ({
 
   if (!currentUser) {
     return (
-      <div className="flex min-h-[58vh] items-center justify-center py-8 animate-in fade-in zoom-in duration-500">
-        <div className="institutional-panel w-full max-w-md rounded-[1.25rem] p-6">
-          <div className="mb-5 flex items-center gap-3 border-b border-[#e7edf3] pb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#eaf4ee] text-[#166534]">
-              <ShieldCheck className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-[#17324d]">Portal Administrativo</h2>
-              <p className="text-sm text-[#617184]">Entre com a credencial autorizada.</p>
-            </div>
-          </div>
+      <div className="flex min-h-[58vh] items-center justify-center py-8 animate-in fade-in duration-500">
+        <div className="w-full max-w-sm rounded-3xl border border-[#d9e1ea] bg-white p-6 shadow-[0_18px_50px_rgba(23,50,77,0.08)]">
           <Login />
         </div>
       </div>
