@@ -1,15 +1,20 @@
 # Seguranca do App
 
-Este projeto trabalha com dados pessoais e dados potencialmente sensiveis de saude. A versao atual e um MVP operacional com melhorias de seguranca no frontend, mas a seguranca definitiva deve ser concluida com Supabase Auth, RLS e/ou backend confiavel antes de uso amplo com dados reais.
+Este projeto trabalha com dados pessoais e dados potencialmente sensiveis de saude. A versao atual ja recebeu cortes importantes de hardening: Supabase Auth obrigatorio em producao, RLS restritiva, Storage privado, RPC publica rate-limited, auditoria por RPC e CSP sem `unsafe-inline`.
 
 ## Estado Atual
 
 - O banco ativo e Supabase.
 - Firebase e usado somente para Hosting do site estatico.
-- O login padrao ainda e local por variaveis de ambiente, com hash de senha, bloqueio por tentativas e expiracao de sessao.
-- `VITE_AUTH_MODE="supabase"` ja existe para testes futuros com Supabase Auth.
-- A validacao publica deve usar `validate_cipf(id, assinatura)` quando a RPC estiver aplicada.
-- A tela publica nao deve consultar `registrations`; ela deve consultar apenas `public_validations` ou RPC segura.
+- Login local fica somente para desenvolvimento/teste. Build de producao falha se `VITE_AUTH_MODE` nao for `supabase`.
+- Supabase Auth esta em uso no projeto real.
+- Admin exige MFA (`aal2`) no banco. Sem MFA, `current_app_role()` retorna `viewer`.
+- Validacao publica usa `validate_cipf_public(text, text)` com rate limit.
+- A tela publica nao consulta `registrations` nem `public_validations` diretamente.
+- Documentos novos usam Storage privado `cipf-documents` e URL assinada curta.
+- Auditoria usa RPC `log_audit_event`; frontend nao insere direto em `audit_logs`.
+- MFA TOTP para admin ja existe no app: enroll, verify e challenge.
+- Em `auth_mode=supabase`, aprovar, emitir, cancelar, renovar, arquivar e autorizar exportacao passam por RPC segura.
 
 ## Melhorias Ja Aplicadas
 
@@ -33,13 +38,15 @@ Este projeto trabalha com dados pessoais e dados potencialmente sensiveis de sau
 - Rascunho com dados sensiveis fica desativado por padrao; so volta se `VITE_ENABLE_SENSITIVE_DRAFTS="true"`.
 - DevTools de massa falsa fica desativado por padrao e exige `VITE_ALLOW_DEV_TOOLS="true"` em ambiente nao-producao.
 - Firebase Hosting recebeu headers basicos de seguranca: CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy e Permissions-Policy.
+- CSP foi endurecida sem `unsafe-inline`.
+- CSV exportado protege contra CSV Injection.
+- Uploads validam tamanho, MIME, extensao e magic bytes.
 
 ## Arquivos de Seguranca e Banco
 
-- `supabase-schema.sql`: schema atual do MVP.
-- `supabase-workflow-status-migration.sql`: migra status antigos para o fluxo atual.
-- `supabase-auth-rls-prep.sql`: prepara tabela de perfis para Supabase Auth.
-- `supabase-hardening-production.sql`: modelo de RLS mais restritivo para producao real.
+- `supabase/migrations/`: fonte canonica das migracoes versionadas.
+- `supabase/tests/rls_profile_smoke.sql`: smoke tests por perfil e MFA.
+- SQLs na raiz seguem apenas por compatibilidade/manual.
 
 ## Ponto Importante Sobre Chaves
 
@@ -64,29 +71,25 @@ Nunca coloque estes itens em `VITE_*`, README, SECURITY, AI_HANDOFF ou codigo ve
 
 ## Antes de Uso Real com Dados Sensiveis
 
-1. Criar usuarios reais no Supabase Auth.
-2. Aplicar/adaptar `supabase-auth-rls-prep.sql`.
-3. Preencher `app_profiles` com `admin`, `attendant` e `viewer`.
-4. Testar localmente com `VITE_AUTH_MODE="supabase"`.
-5. Confirmar que cada perfil acessa somente o que deveria.
-6. Adaptar e aplicar `supabase-hardening-production.sql`.
-7. Remover politicas MVP `to anon using (true)` do banco vivo.
-8. Testar cadastro, edicao, aprovacao, emissao, impressao, dashboard, documentos, auditoria e validacao publica com dados ficticios.
-9. Remover qualquer credencial local de teste antes de uso oficial.
+1. Confirmar MFA ativo para admin e validar sessao `aal2`.
+2. Confirmar senha/perfil do atendente e testar acesso real.
+3. Testar cadastro completo com Supabase Auth e Storage privado.
+4. Criar usuario `viewer`, se o fluxo operacional exigir consulta interna.
+5. Rodar `supabase/tests/rls_profile_smoke.sql` apos cada alteracao de RLS.
+6. Remover qualquer credencial local de teste antes de uso oficial.
 
-## Riscos Ainda Nao Resolvidos Sem Backend/Auth
+## Riscos Ainda Nao Resolvidos
 
-- Login local em frontend nao e seguranca real, mesmo com hash.
-- Sessao em `sessionStorage` pode ser manipulada no DevTools enquanto o app usar login local.
-- Lockout em `localStorage` e apenas protecao de UX, nao rate limit real.
-- IP real nao pode ser auditado com confianca sem Edge Function/backend.
-- RLS aberta para `anon` precisa ser substituida por politicas autenticadas antes de dados reais.
+- IP auditado por RPC depende dos headers repassados pelo Supabase.
+- Em modo local, MVP ainda usa fallback frontend para nao quebrar testes controlados.
+- Exportacao ainda gera arquivo no navegador; Edge Function continua opcao futura para arquivo assinado/backend-only.
+- Login local deve continuar proibido em producao.
 
 ## Regras de Ouro para Futuras Alteracoes
 
 - Nunca deixar a tela publica ler `registrations`.
 - Nunca liberar impressao para atendente ou consulta.
 - Nunca salvar segredos em arquivos versionados.
-- Nunca aplicar RLS restritiva no banco vivo sem testar Auth/perfis antes.
-- Sempre registrar auditoria para acao sensivel.
+- Nunca aplicar RLS restritiva no banco vivo sem rodar smoke tests por perfil.
+- Sempre registrar auditoria via RPC para acao sensivel.
 - Sempre validar build e permissao antes de publicar.

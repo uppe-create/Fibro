@@ -49,12 +49,12 @@ export function generateSecureToken(length = 24): string {
   return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
 }
 
-export function getSafeErrorMessage(error: unknown, fallback = "Nao foi possivel concluir a operacao. Tente novamente."): string {
+export function getSafeErrorMessage(error: unknown, fallback = "Não foi possível concluir a operação. Tente novamente."): string {
   const message = String((error as any)?.message || "");
   const code = String((error as any)?.code || "");
 
   if (message === "CPF_DUPLICATE_ACTIVE" || code === "23505") {
-    return "CPF ja possui cadastro em andamento ou carteirinha existente.";
+    return "CPF já possui cadastro em andamento ou carteirinha existente.";
   }
 
   if (code === "PGRST205" || message.includes("schema cache")) {
@@ -62,7 +62,7 @@ export function getSafeErrorMessage(error: unknown, fallback = "Nao foi possivel
   }
 
   if (message.toLowerCase().includes("permission") || message.toLowerCase().includes("rls")) {
-    return "Sem permissao para executar esta acao. Verifique o perfil de acesso.";
+    return "Sem permissão para executar esta ação. Verifique o perfil de acesso.";
   }
 
   return fallback;

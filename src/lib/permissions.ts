@@ -6,6 +6,12 @@ export type Permission =
   | 'viewCarteirinha'
   | 'printCarteirinha'
   | 'viewDashboard'
+  | 'viewOperations'
+  | 'viewPeople'
+  | 'viewDocumentsQueue'
+  | 'viewPickupQueue'
+  | 'viewReports'
+  | 'viewAudit'
   | 'createRegistration'
   | 'editRegistration'
   | 'approveRegistration'
@@ -30,6 +36,12 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'viewCarteirinha',
     'printCarteirinha',
     'viewDashboard',
+    'viewOperations',
+    'viewPeople',
+    'viewDocumentsQueue',
+    'viewPickupQueue',
+    'viewReports',
+    'viewAudit',
     'createRegistration',
     'editRegistration',
     'approveRegistration',
@@ -47,10 +59,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   attendant: [
     'viewDashboard',
+    'viewPeople',
     'createRegistration',
     'editRegistration',
-    'approveRegistration',
-    'renewRegistration',
     'viewDocuments',
     'viewHistory',
     'viewSettings'
@@ -84,10 +95,16 @@ export function hasPermission(user: UserLike, permission: Permission): boolean {
 }
 
 export function canAccessTab(user: UserLike, tab: string): boolean {
-  if (tab === 'valida') return true;
+  if (['inicio', 'validar', 'valida', 'privacidade', 'termos', 'contato', 'acessibilidade', 'suporte'].includes(tab)) return true;
   if (tab === 'carteirinha') return hasPermission(user, 'printCarteirinha');
   if (tab === 'cadastro') return hasPermission(user, 'createRegistration');
   if (tab === 'dashboard') return hasPermission(user, 'viewDashboard');
+  if (tab === 'operacao') return hasPermission(user, 'viewOperations');
+  if (tab === 'pessoas') return hasPermission(user, 'viewPeople');
+  if (tab === 'documentos') return hasPermission(user, 'viewDocumentsQueue');
+  if (tab === 'retiradas') return hasPermission(user, 'viewPickupQueue');
+  if (tab === 'relatorios') return hasPermission(user, 'viewReports');
+  if (tab === 'auditoria') return hasPermission(user, 'viewAudit');
   if (tab === 'configuracoes') return hasPermission(user, 'viewSettings');
   if (tab === 'dev') return hasPermission(user, 'useDevTools');
   return false;
@@ -96,6 +113,6 @@ export function canAccessTab(user: UserLike, tab: string): boolean {
 export function getDefaultTabForRole(role: unknown): string {
   const normalizedRole = normalizeRole(role);
   if (normalizedRole === 'admin') return 'dashboard';
-  if (normalizedRole === 'attendant') return 'cadastro';
-  return 'valida';
+  if (normalizedRole === 'attendant') return 'pessoas';
+  return 'configuracoes';
 }

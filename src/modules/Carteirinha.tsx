@@ -3,14 +3,17 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { CIPFRegistration, useAppStore } from '@/store/useAppStore';
 import { Search, FileBadge2, Loader2, Image as ImageIcon } from 'lucide-react';
+import { PageHeader } from '@/components/ui/layout';
 import { CarteirinhaPreview } from '@/components/CarteirinhaPreview';
 import { loadCipfFileDataUri } from '@/lib/cipf-files';
 import { hasPermission } from '@/lib/permissions';
 import { supabase } from '@/lib/supabase';
 import { logAuditEvent } from '@/lib/audit';
+import { buildAuditEvent } from '@/lib/audit-events';
 import { getStatusLabel, isPrintableStatus, normalizeRegistrationStatus } from '@/lib/registration-status';
 
 const PRINT_REGISTRATION_STORAGE_KEY = 'cipf_print_registration_id';
+const BATCH_PRINT_STORAGE_KEY = 'cipf_batch_print_ids';
 
 export function Carteirinha() {
   const { registrations, fetchRegistrations, currentUser } = useAppStore();
@@ -21,25 +24,21 @@ export function Carteirinha() {
   const [isImageLoaded, setIsImageLoaded] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [batchIds, setBatchIds] = useState<string[]>([]);
   const printRef = useRef<HTMLDivElement>(null);
   const queryParams = new URLSearchParams(window.location.search);
   const searchFromUrlRef = useRef(
     queryParams.get('id') || sessionStorage.getItem(PRINT_REGISTRATION_STORAGE_KEY) || queryParams.get('search') || ''
   );
 
-  if (!canPrintCarteirinha) {
-    return (
-      <div className="mx-auto max-w-xl rounded-2xl border border-red-100 bg-red-50 p-6 text-center text-red-800">
-        <h2 className="text-xl font-black">Impressao restrita</h2>
-        <p className="mt-2 text-sm">
-          Por protecao de dados e LGPD, somente o perfil Administrador pode visualizar e baixar carteirinhas para impressao.
-        </p>
-      </div>
-    );
-  }
-
   useEffect(() => {
     const bootstrap = async () => {
+      try {
+        const parsedBatch = JSON.parse(sessionStorage.getItem(BATCH_PRINT_STORAGE_KEY) || '[]');
+        if (Array.isArray(parsedBatch)) setBatchIds(parsedBatch.filter(Boolean));
+      } catch {
+        sessionStorage.removeItem(BATCH_PRINT_STORAGE_KEY);
+      }
       if (registrations.length === 0) {
         setIsLoading(true);
         await fetchRegistrations();
@@ -85,7 +84,7 @@ export function Carteirinha() {
     
     if (found) {
       if (!isPrintableStatus(found.status)) {
-        alert(`Cadastro encontrado, mas o status atual e "${getStatusLabel(found.status)}". Apenas carteirinhas aprovadas ou emitidas podem ser impressas.`);
+        alert(`Cadastro encontrado, mas o status atual é "${getStatusLabel(found.status)}". Apenas carteirinhas aprovadas ou emitidas podem ser impressas.`);
         setSelectedReg(null);
         setPhotoDataUri('');
         return;
@@ -104,13 +103,18 @@ export function Carteirinha() {
   const handlePrint = async () => {
     if (!printRef.current || !selectedReg) return;
     if (!canPrintCarteirinha) {
-      alert('Seu perfil nao permite baixar carteirinhas.');
+      alert('Seu perfil não permite baixar carteirinhas.');
       return;
     }
+    const isFirstIssue = normalizeRegistrationStatus(selectedReg.status) === 'approved';
+    const confirmMessage = isFirstIssue
+      ? `Emitir e baixar a carteirinha de ${selectedReg.fullName}?`
+      : `Baixar novamente a carteirinha de ${selectedReg.fullName}?`;
+    if (!window.confirm(`${confirmMessage}\n\nConfirme somente se você revisou os dados da carteirinha.`)) return;
     
     try {
       setIsPrinting(true);
-      if (normalizeRegistrationStatus(selectedReg.status) === 'approved') {
+      if (isFirstIssue) {
         const issueDate = new Date();
         const expiryDate = new Date(issueDate);
         expiryDate.setFullYear(expiryDate.getFullYear() + 2);
@@ -129,20 +133,19 @@ export function Carteirinha() {
           .eq('cpf', selectedReg.cpf.replace(/\D/g, ''));
         if (indexError) throw indexError;
 
-        await logAuditEvent({
-          action: 'Carteirinha Emitida',
-          registrationId: selectedReg.id,
-          userId: currentUser?.id || null,
-          userName: currentUser?.name || 'Sistema',
-          reason: 'Download PNG pelo modulo Carteirinha'
-        });
+        await logAuditEvent(buildAuditEvent('card.issued', {
+            registrationId: selectedReg.id,
+            userId: currentUser?.id || null,
+            userName: currentUser?.name || 'Sistema',
+            targetLabel: selectedReg.fullName,
+            details: 'Download PNG pelo modulo Carteirinha'
+          }));
 
         setSelectedReg({ ...selectedReg, ...payload, status: 'issued' });
         await new Promise((resolve) => requestAnimationFrame(resolve));
         await fetchRegistrations();
       }
       
-      // Load the PNG generator only when the user actually downloads a card.
       const htmlToImage = await import('html-to-image');
       const dataUrl = await htmlToImage.toPng(printRef.current, {
         quality: 1.0,
@@ -150,92 +153,149 @@ export function Carteirinha() {
         backgroundColor: '#ffffff',
       });
       
-      // Create a download link for the image
       const link = document.createElement('a');
       link.download = `CIPF_${selectedReg.cpf.replace(/\D/g, '')}.png`;
       link.href = dataUrl;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+
+      if (batchIds.length > 1) {
+        const remaining = batchIds.filter((id) => id !== selectedReg.id);
+        sessionStorage.setItem(BATCH_PRINT_STORAGE_KEY, JSON.stringify(remaining));
+        setBatchIds(remaining);
+        const nextId = remaining[0];
+        const nextReg = registrations.find((reg) => reg.id === nextId);
+        if (nextReg) {
+          setSelectedReg(nextReg);
+          setSearchTerm(nextReg.fullName);
+          setIsImageLoaded(false);
+          const nextPhotoUri = await loadCipfFileDataUri(nextReg.photoFileId, nextReg.photoUrl || '');
+          setPhotoDataUri(nextPhotoUri);
+          alert(`Carteirinha gerada. Próxima do lote: ${nextReg.fullName}`);
+        }
+      } else if (batchIds.length === 1) {
+        sessionStorage.removeItem(BATCH_PRINT_STORAGE_KEY);
+        setBatchIds([]);
+      }
       
-    } catch (error) {
-      console.error('Erro ao gerar imagem:', error);
+    } catch {
       alert('Ocorreu um erro ao gerar o arquivo para impressão. Tente novamente.');
     } finally {
       setIsPrinting(false);
     }
   };
 
-  return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white/20 overflow-hidden print:hidden">
-        <div className="p-8 text-center border-b border-gray-100/50">
-          <div className="w-16 h-16 bg-blue-600/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <FileBadge2 className="w-8 h-8 text-blue-600" />
-          </div>
-          <h2 className="text-2xl font-semibold text-[#1D1D1F] tracking-tight">Consulta de Carteirinha</h2>
-          <p className="text-[#86868B] mt-1">Busque por um cadastro aprovado ou emitido para gerar a CIPF.</p>
+  if (!canPrintCarteirinha) {
+    return (
+      <div className="cipf-panel mx-auto max-w-xl p-8 text-center">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-600">
+          <FileBadge2 className="h-7 w-7" />
         </div>
-        <div className="p-8 bg-gray-50/30">
-          <div className="flex flex-col sm:flex-row gap-3 max-w-2xl mx-auto">
+        <h2 className="cipf-title mt-5 text-2xl">Impressão restrita</h2>
+        <p className="cipf-description mt-3 text-sm">
+          Por proteção de dados e LGPD, somente o perfil Administrador pode visualizar e baixar carteirinhas para impressão.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="cipf-page cipf-page-stack">
+      <section className="cipf-panel overflow-hidden print:hidden">
+        <div className="px-5 py-6 sm:px-8 sm:py-8">
+          {batchIds.length > 0 && (
+            <div className="mb-5 rounded-2xl border border-[#d9e1ea] bg-[#f8fafc] px-4 py-3 text-sm font-semibold text-[#17324d]">
+              Lote de impressão ativo: {batchIds.length} carteirinha(s). Baixe a atual para avançar para a próxima.
+            </div>
+          )}
+          <PageHeader
+            eyebrow="Serviço interno"
+            title="Imprimir Carteirinha de Fibromialgia"
+            description="Busque uma carteirinha aprovada ou emitida para gerar o arquivo de impressão em PNG."
+            tone="purple"
+            className="!border-0 !pb-0"
+            actions={
+              <div className="cipf-subpanel bg-white px-4 py-3 text-sm leading-6 text-[var(--brand-muted)] lg:max-w-xs">
+                <span className="font-semibold text-[var(--brand-ink)]">Acesso administrativo.</span> A emissão da carteirinha é registrada na auditoria do sistema.
+              </div>
+            }
+          />
+        </div>
+
+        <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-soft)] px-4 py-6 sm:px-10 sm:py-8">
+          <div className="mx-auto flex max-w-3xl flex-col gap-3 sm:flex-row">
             <div className="relative flex-1">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-[#86868B]" />
+              <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#617184]" />
               <Input 
-                placeholder="Digite o Nome completo ou CPF do titular..." 
+                placeholder="Digite o nome completo, CPF ou Cartão SUS..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                className="pl-12 bg-white border-gray-200 focus:border-blue-500 focus:ring-blue-500/20 transition-all rounded-2xl h-14 text-base shadow-sm"
+                className="h-12 pl-12 text-base shadow-sm"
                 disabled={isLoading}
               />
             </div>
             <Button 
               onClick={handleSearch} 
               disabled={isLoading || !searchTerm.trim()}
-              className="rounded-2xl h-14 px-8 bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-all active:scale-[0.98]"
+              size="lg"
+              className="w-full sm:w-auto"
             >
               Buscar
             </Button>
           </div>
         </div>
-      </div>
+      </section>
 
       {isLoading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-[#86868B]">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600 mb-4" />
-          <p className="text-lg font-medium text-[#1D1D1F]">Carregando registros...</p>
+        <div className="cipf-panel py-16 text-center">
+          <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-[#005eb8]" />
+          <p className="text-lg font-semibold tracking-[-0.02em] text-[#1f3657]">Carregando registros...</p>
+          <p className="mt-1 text-sm text-[#617184]">Aguarde enquanto buscamos os cadastros disponíveis para impressão.</p>
         </div>
       ) : selectedReg && (
         <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
-          <div className="flex justify-end print:hidden">
-            <Button 
-              onClick={handlePrint} 
-              disabled={!canPrintCarteirinha || isPrinting || (!!photoDataUri && !isImageLoaded)}
-              className="rounded-xl h-10 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-all active:scale-[0.98] disabled:opacity-50"
-            >
-              {isPrinting ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Gerando Imagem...
-                </>
-              ) : (
-                <>
-                  <ImageIcon className="h-4 w-4 mr-2" />
-                  Baixar Imagem (PNG)
-                </>
-              )}
-            </Button>
-          </div>
+          <section className="cipf-panel p-4 sm:p-6 print:bg-transparent print:p-0 print:shadow-none">
+            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between print:hidden">
+              <div>
+                <p className="cipf-kicker">Pré-visualização</p>
+                <h3 className="cipf-title mt-1 break-words text-lg sm:text-xl">{selectedReg.fullName}</h3>
+                <p className="cipf-description mt-1 text-sm">Status: {getStatusLabel(selectedReg.status)}</p>
+              </div>
 
-          {/* Container for printing - ensures correct sizing on paper */}
-          <div className="flex flex-col items-center justify-center gap-8 print:block print:w-full">
-            <CarteirinhaPreview 
-              ref={printRef} 
-              registration={selectedReg} 
-              photoDataUri={photoDataUri} 
-              onImageLoad={() => setIsImageLoaded(true)}
-            />
-          </div>
+              <Button 
+                onClick={handlePrint} 
+                disabled={!canPrintCarteirinha || isPrinting || (!!photoDataUri && !isImageLoaded)}
+                className="w-full sm:w-auto"
+              >
+                {isPrinting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Gerando imagem...
+                  </>
+                ) : (
+                  <>
+                    <ImageIcon className="mr-2 h-4 w-4" />
+                    Baixar imagem PNG
+                  </>
+                )}
+              </Button>
+            </div>
+
+            <div className="overflow-x-auto rounded-[1.75rem] bg-[#f8fbfd] p-2 sm:p-6 print:bg-transparent print:p-0">
+              <div className="flex min-w-[360px] flex-col items-center justify-center gap-8 print:block print:w-full">
+                <div className="origin-top scale-[0.82] sm:scale-100">
+                  <CarteirinhaPreview 
+                    ref={printRef} 
+                    registration={selectedReg} 
+                    photoDataUri={photoDataUri} 
+                    onImageLoad={() => setIsImageLoaded(true)}
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
       )}
     </div>
