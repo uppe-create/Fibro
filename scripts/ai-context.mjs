@@ -7,18 +7,25 @@ const MAX_FILES = 18;
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx']);
 
 const moduleNotes = [
-  ['App shell', 'src/App.tsx', 'Rotas/tabs, navegação, permissões visuais e layout principal.'],
-  ['Estado global', 'src/store/useAppStore.ts', 'Usuário local, sessão, carregamento Supabase e cadastros.'],
-  ['Cadastro', 'src/modules/Cadastro.tsx', 'Wizard de emissão, validações, upload, rascunho e gravação no Supabase.'],
-  ['Validação pública', 'src/modules/Valida.tsx', 'Consulta por QR/arquivo/código manual usando RPC/tabela pública.'],
-  ['Carteirinha física', 'src/components/CarteirinhaPreview.tsx', 'Layout impresso 8.5cm x 5.4cm. Evite alterar sem teste visual.'],
-  ['Tela de impressão', 'src/modules/Carteirinha.tsx', 'Busca, permissão admin, emissão e download PNG.'],
-  ['Operação', 'src/modules/Operacao.tsx', 'Aprovação, emissão, WhatsApp, retirada e ações sensíveis de admin.'],
-  ['Pessoas', 'src/modules/Pessoas.tsx', 'Lista interna, filtros, ficha, edição e histórico individual.'],
-  ['Filas', 'src/modules/dashboard/components', 'Componentes compartilhados para listas, modais, métricas e filtros.'],
-  ['Regras de status', 'src/lib/registration-status.ts', 'Labels, status legados, validade pública e transições.'],
-  ['Permissões', 'src/lib/permissions.ts', 'Papéis admin/attendant/viewer e permissões de interface.'],
-  ['Supabase', 'src/lib/supabase.ts', 'Cliente Supabase e verificação de ambiente.']
+  ['App shell', 'src/app/AppShell.tsx', 'Sessao, navegacao, layout, bloqueio MFA e renderizacao de modulos.'],
+  ['Rotas publicas', 'src/app/PublicRoutes.tsx', 'Entrada publica, validacao e protecao por permissao.'],
+  ['Estado global', 'src/store/useAppStore.ts', 'Auth local/Supabase, MFA, sessao, cadastros e exportacao.'],
+  ['Cadastro', 'src/modules/Cadastro.tsx', 'Wizard fino; submit/upload vive em hooks e componentes de cadastro.'],
+  ['Submit cadastro', 'src/modules/cadastro/hooks/useCadastroSubmit.ts', 'Validacoes finais, Storage privado, upsert publico e rollback.'],
+  ['Validacao publica', 'src/modules/Valida.tsx', 'Consulta por QR/arquivo/codigo manual usando RPC publica.'],
+  ['Valida lib', 'src/modules/valida/lib/publicValidation.ts', 'Chama somente validate_cipf_public e falha fechado.'],
+  ['Carteirinha fisica', 'src/components/CarteirinhaPreview.tsx', 'Layout impresso 8.5cm x 5.4cm. Evite alterar sem teste visual.'],
+  ['Tela de impressao', 'src/modules/Carteirinha.tsx', 'Busca, permissao admin, emissao e download PNG.'],
+  ['Operacao', 'src/modules/Operacao.tsx', 'Aprovacao, emissao, WhatsApp, retirada e acoes sensiveis.'],
+  ['Pessoas', 'src/modules/Pessoas.tsx', 'Lista interna, filtros, ficha, edicao e historico individual.'],
+  ['Workflow', 'src/modules/dashboard/hooks/useRegistrationWorkflow.ts', 'Transicoes, auditoria e fallback RPC/admin.'],
+  ['Exportacao', 'src/modules/dashboard/hooks/useDashboardExports.ts', 'CSV/PDF, auditoria e protecao contra CSV Injection.'],
+  ['MFA', 'src/modules/MfaChallenge.tsx', 'Desafio TOTP para promover sessao admin a aal2.'],
+  ['Configuracoes', 'src/modules/Configuracoes.tsx', 'Painel MFA, sessao, permissoes e status do sistema.'],
+  ['Regras de status', 'src/lib/registration-status.ts', 'Labels, status legados, validade publica e transicoes.'],
+  ['Permissoes', 'src/lib/permissions.ts', 'Papeis admin/attendant/viewer e permissoes de interface.'],
+  ['Admin RPC', 'src/lib/admin-rpc.ts', 'Chamadas admin_transition_registration e admin_request_export.'],
+  ['Supabase', 'src/lib/supabase.ts', 'Cliente Supabase e verificacao de ambiente.']
 ];
 
 function walk(dir) {
@@ -46,9 +53,9 @@ const files = walk(SRC)
 
 console.log('# CIPF AI Context');
 console.log('');
-console.log('Use este resumo antes de abrir arquivos grandes. Abra só o módulo afetado pela tarefa.');
+console.log('Use este resumo antes de abrir arquivos grandes. Abra so o modulo afetado pela tarefa.');
 console.log('');
-console.log('## Mapa rápido');
+console.log('## Mapa rapido');
 for (const [area, file, note] of moduleNotes) {
   console.log(`- ${area}: ${file} - ${note}`);
 }
@@ -59,8 +66,8 @@ for (const item of files) {
 }
 console.log('');
 console.log('## Regras para economizar tokens');
-console.log('- Prefira `npm run ai:context` e buscas específicas antes de abrir arquivos inteiros.');
-console.log('- Para UI, comece por `src/index.css`, `src/components/ui/*` e só depois a tela afetada.');
+console.log('- Prefira `npm run ai:context` e buscas especificas antes de abrir arquivos inteiros.');
+console.log('- Para UI, comece por `src/index.css`, `src/components/ui/*` e so depois a tela afetada.');
 console.log('- Para cadastro, abra componentes em `src/modules/cadastro/components` antes de `Cadastro.tsx`.');
-console.log('- Para dashboard/operação, prefira hooks/componentes em `src/modules/dashboard/*`.');
+console.log('- Para dashboard/operacao, prefira hooks/componentes em `src/modules/dashboard/*`.');
 console.log('- Evite `git diff` completo; use `git diff --stat` ou `git diff -- <arquivo>`.');

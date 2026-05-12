@@ -223,7 +223,7 @@ export function Carteirinha() {
           />
         </div>
 
-        <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-soft)] px-5 py-8 sm:px-10">
+        <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-soft)] px-4 py-6 sm:px-10 sm:py-8">
           <div className="mx-auto flex max-w-3xl flex-col gap-3 sm:flex-row">
             <div className="relative flex-1">
               <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-[#617184]" />
@@ -232,7 +232,7 @@ export function Carteirinha() {
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                className="pl-12 text-base shadow-sm"
+                className="h-12 pl-12 text-base shadow-sm"
                 disabled={isLoading}
               />
             </div>
@@ -240,6 +240,7 @@ export function Carteirinha() {
               onClick={handleSearch} 
               disabled={isLoading || !searchTerm.trim()}
               size="lg"
+              className="w-full sm:w-auto"
             >
               Buscar
             </Button>
@@ -255,17 +256,18 @@ export function Carteirinha() {
         </div>
       ) : selectedReg && (
         <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
-          <section className="cipf-panel p-5 sm:p-6 print:bg-transparent print:p-0 print:shadow-none">
+          <section className="cipf-panel p-4 sm:p-6 print:bg-transparent print:p-0 print:shadow-none">
             <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between print:hidden">
               <div>
                 <p className="cipf-kicker">Pré-visualização</p>
-                <h3 className="cipf-title mt-1 text-xl">{selectedReg.fullName}</h3>
+                <h3 className="cipf-title mt-1 break-words text-lg sm:text-xl">{selectedReg.fullName}</h3>
                 <p className="cipf-description mt-1 text-sm">Status: {getStatusLabel(selectedReg.status)}</p>
               </div>
 
               <Button 
                 onClick={handlePrint} 
                 disabled={!canPrintCarteirinha || isPrinting || (!!photoDataUri && !isImageLoaded)}
+                className="w-full sm:w-auto"
               >
                 {isPrinting ? (
                   <>
@@ -281,14 +283,16 @@ export function Carteirinha() {
               </Button>
             </div>
 
-            <div className="rounded-[1.75rem] bg-[#f8fbfd] p-4 sm:p-6 print:bg-transparent print:p-0">
-              <div className="flex flex-col items-center justify-center gap-8 print:block print:w-full">
-                <CarteirinhaPreview 
-                  ref={printRef} 
-                  registration={selectedReg} 
-                  photoDataUri={photoDataUri} 
-                  onImageLoad={() => setIsImageLoaded(true)}
-                />
+            <div className="overflow-x-auto rounded-[1.75rem] bg-[#f8fbfd] p-2 sm:p-6 print:bg-transparent print:p-0">
+              <div className="flex min-w-[360px] flex-col items-center justify-center gap-8 print:block print:w-full">
+                <div className="origin-top scale-[0.82] sm:scale-100">
+                  <CarteirinhaPreview 
+                    ref={printRef} 
+                    registration={selectedReg} 
+                    photoDataUri={photoDataUri} 
+                    onImageLoad={() => setIsImageLoaded(true)}
+                  />
+                </div>
               </div>
             </div>
           </section>

@@ -8,8 +8,9 @@ Aplicacao web para cadastro, analise, aprovacao, emissao, impressao e validacao 
 - **Banco de dados:** Supabase.
 - **Hospedagem:** Firebase Hosting apenas para publicar o site estatico gerado em `dist/`.
 - **Validacao publica:** QR Code aponta para o proprio app e consulta dados minimos somente pela RPC `validate_cipf_public`.
-- **Autenticacao atual:** login local configurado por `.env.local`, com bloqueio por tentativas e sessao com expiracao.
-- **Autenticacao segura:** `VITE_AUTH_MODE="supabase"` ativa Supabase Auth, MFA TOTP no app e degrade de admin sem `aal2`.
+- **Autenticacao atual:** Supabase Auth em producao; login local fica so para desenvolvimento/testes controlados.
+- **Autenticacao segura:** `VITE_AUTH_MODE="supabase"` ativa Supabase Auth, MFA TOTP no app e degradacao de admin sem `aal2`.
+- **SQL canonico:** migracoes ficam em `supabase/migrations/`; SQLs raiz sao legado/manual.
 - **Performance:** telas e bibliotecas pesadas, como PDF, QR e geracao de PNG, carregam sob demanda.
 
 ## Funcionalidades Principais
@@ -121,8 +122,9 @@ Em `VITE_AUTH_MODE="supabase"`, aplique ao menos:
 - Nao coloque `sb_secret`, service role key, senha do banco ou chaves administrativas em variaveis `VITE_*`.
 - `VITE_SUPABASE_ANON_KEY` e publica por natureza em app frontend; a protecao real deve vir de RLS, Supabase Auth ou backend confiavel.
 - O login local e adequado para MVP/testes controlados, mas nao substitui Auth/RLS em uso real com dados sensiveis.
-- Para testar Supabase Auth, crie usuarios/perfis no Supabase, aplique/adapte `supabase-auth-rls-prep.sql` e altere `VITE_AUTH_MODE` para `supabase`.
-- Em modo Supabase, o frontend espera RPCs administrativas em `supabase-hardening-production.sql`:
+- Para testar Supabase Auth, crie usuarios/perfis no Supabase, aplique as migracoes em `supabase/migrations/` e altere `VITE_AUTH_MODE` para `supabase`.
+- Admin precisa ativar/validar MFA para obter `aal2`.
+- Em modo Supabase, o frontend espera RPCs administrativas em `supabase/migrations/20260512095000_hardening_production.sql`:
   - `admin_transition_registration`
   - `admin_request_export`
 - Rascunhos com dados sensiveis e DevTools ficam desativados por padrao por seguranca.

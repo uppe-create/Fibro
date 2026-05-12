@@ -12,7 +12,7 @@ Fluxo:
 1. Usuario interno entra.
 2. Atendente/admin cadastra pessoa e anexa documentos.
 3. Cadastro novo entra `under_review`.
-4. Admin aprova para `approved`.
+4. Admin ou atendente aprova para `approved`.
 5. Admin emite para `issued`.
 6. Publico valida por QR Code e ve so dados minimos.
 
@@ -34,7 +34,10 @@ Fluxo:
 
 ## Arquivos Principais
 
-- `src/store/useAppStore.ts`: auth, sessao, registros, backup, limpeza.
+- `src/App.tsx`: entrada fina.
+- `src/app/AppShell.tsx`: shell, sessao, navegacao, lazy modules e bloqueio MFA.
+- `src/app/PublicRoutes.tsx`: rotas publicas/protegidas.
+- `src/store/useAppStore.ts`: auth, MFA, sessao, registros, backup, limpeza.
 - `src/lib/permissions.ts`: matriz unica de permissoes.
 - `src/lib/auth-mode.ts`: trava auth insegura em producao.
 - `src/lib/admin-rpc.ts`: ponte frontend para RPC administrativa.

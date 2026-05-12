@@ -30,6 +30,7 @@ Fluxo principal:
 - Formularios/validacao: React Hook Form + Zod.
 - Banco ativo: Supabase.
 - Auth: Supabase Auth em producao; login local so para desenvolvimento/testes.
+- MFA: admin precisa de `aal2`; app tem desafio TOTP e painel em Configuracoes.
 - Hosting: Firebase Hosting para `dist/`.
 - Testes: Vitest e Playwright.
 - UI: CSS/Tailwind v4, componentes em `src/components/ui`, icones `lucide-react`.
@@ -42,6 +43,7 @@ Usar PowerShell no Windows.
 npm.cmd install
 npm.cmd run dev -- --host 127.0.0.1 --port 5173
 npm.cmd run lint
+npm.cmd run typecheck
 npm.cmd test
 npm.cmd run test:e2e
 npm.cmd run build
@@ -76,6 +78,7 @@ Ler antes de mexer em area sensivel:
 - `src/store/useAppStore.ts`: estado global, sessao, auth, carregamento e operacoes.
 - `src/modules/Cadastro.tsx`: wizard principal de cadastro.
 - `src/modules/cadastro/*`: componentes, hooks e libs do cadastro.
+- `src/modules/cadastro/hooks/useCadastroSubmit.ts`: validacao final, Storage privado, upsert publico e rollback.
 - `src/modules/Pessoas.tsx`: lista, ficha, edicao e historico.
 - `src/modules/Dashboard.tsx`: KPIs, filtros, filas e acoes de dashboard.
 - `src/modules/dashboard/*`: partes extraidas do dashboard.
@@ -85,10 +88,11 @@ Ler antes de mexer em area sensivel:
 - `src/modules/valida/lib/*`: scanner QR/PDF e RPC publica.
 - `src/modules/Operacao.tsx`: acoes sensiveis.
 - `src/modules/Configuracoes.tsx`: sessao, permissoes e status do sistema.
-- `src/modules/MfaChallenge.tsx`: fluxo MFA.
+- `src/modules/MfaChallenge.tsx`: desafio TOTP MFA.
 - `src/lib/permissions.ts`: matriz unica de papeis/permissoes.
 - `src/lib/registration-status.ts`: status, labels, validade e workflow.
 - `src/lib/auth-mode.ts`: trava login local em producao.
+- `src/lib/admin-rpc.ts`: RPCs `admin_transition_registration` e `admin_request_export`.
 - `src/lib/file-security.ts`: validacao de uploads.
 - `src/lib/storage-files.ts`: Storage privado, metadados, URL assinada e rollback.
 - `src/lib/cipf-files.ts`: leitura Storage e fallback legado Base64.
@@ -101,13 +105,9 @@ Ler antes de mexer em area sensivel:
 
 ## SQL e Supabase
 
-- `supabase-schema.sql`: schema MVP.
-- `supabase-workflow-status-migration.sql`: migracao de status antigos.
-- `supabase-auth-rls-prep.sql`: perfis para Supabase Auth.
-- `supabase-hardening-production.sql`: RLS restritiva, RPC publica, auditoria e MFA.
-- `supabase-storage-private-documents.sql`: bucket privado e policies de Storage.
-- `supabase-rls-profile-tests.sql`: smoke tests manuais por perfil.
-- `supabase-operational-fields.sql`: campos operacionais.
+- `supabase/migrations/`: fonte canonica atual.
+- `supabase/tests/rls_profile_smoke.sql`: smoke tests por perfil.
+- SQLs `.sql` na raiz: legado/manual para compatibilidade.
 
 Tabelas importantes:
 
@@ -132,6 +132,7 @@ Tabelas importantes:
 - Documentos novos devem usar Storage privado `cipf-documents`.
 - Novos documentos nao devem ser salvos em Base64; Base64/chunks e fallback legado.
 - Acoes sensiveis devem chamar `logAuditEvent`, que usa RPC `log_audit_event`.
+- Quando disponivel, preferir RPCs operacionais `admin_transition_registration` e `admin_request_export`.
 - Erros exibidos ao usuario devem passar por mensagem segura, sem vazar detalhe interno de banco.
 - CSV exportado deve proteger contra CSV Injection.
 - Rascunho sensivel fica desativado por padrao.
@@ -244,10 +245,9 @@ Escolher menor conjunto que cobre risco:
 
 ## Proximas Melhorias Recomendadas
 
-- Completar fluxo MFA no app para admin obter `aal2`.
-- Extrair submit/upload de `Cadastro.tsx` para hook dedicado.
+- Manter fluxo MFA validado em ambiente real para admin obter `aal2`.
+- Continuar reduzindo `Cadastro.tsx`; submit/upload ja esta em hook dedicado.
 - Separar regras de notificacao de componente visual.
-- Consolidar SQLs de producao em migracao versionada.
+- Usar sempre `supabase/migrations/` como fonte canonica.
 - Migrar aprovar/emitir/cancelar/exportar para RPCs ou Edge Functions.
 - Adicionar e2e autenticado por perfil.
-

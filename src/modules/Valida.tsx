@@ -218,7 +218,7 @@ export function Valida() {
       <div id="qr-reader-hidden" className="hidden" />
 
       <header className="relative z-10 border-b border-[hsl(270_15%_90%/0.75)] bg-[hsl(30_25%_98%/0.72)] backdrop-blur-xl">
-        <div className="mx-auto flex h-20 max-w-[1240px] items-center justify-between px-4 md:px-8">
+        <div className="mx-auto flex min-h-16 max-w-[1240px] items-center justify-between gap-3 px-4 py-3 md:h-20 md:px-8 md:py-0">
           <button type="button" onClick={() => setActiveTab('inicio')} className="flex items-center">
             <div className="leading-tight">
               <div className="lovable-display text-base font-semibold">CIPF</div>
@@ -226,7 +226,7 @@ export function Valida() {
             </div>
           </button>
 
-          <nav className="flex items-center gap-4 text-sm text-[hsl(270_25%_14%/0.70)] sm:gap-7">
+          <nav className="flex items-center gap-2 text-sm text-[hsl(270_25%_14%/0.70)] sm:gap-7">
             <button type="button" onClick={() => setActiveTab('inicio')} className="transition hover:text-[hsl(270_25%_14%)]">
               Início
             </button>
@@ -240,7 +240,7 @@ export function Valida() {
         </div>
       </header>
 
-      <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-10 md:px-8 md:py-14">
+      <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 md:gap-8 md:px-8 md:py-14">
         <div className="border-b border-[hsl(270_15%_90%)] pb-8">
           <div className="text-xs font-semibold text-[hsl(270_8%_42%)]">
             <button type="button" onClick={() => setActiveTab('inicio')} className="font-bold hover:text-[hsl(271_52%_32%)]">
@@ -248,8 +248,8 @@ export function Valida() {
             </button>
             <span> / Validação pública</span>
           </div>
-          <h1 className="mt-4 text-4xl font-semibold leading-tight md:text-6xl">Validação pública</h1>
-          <p className="mt-4 max-w-3xl text-base leading-relaxed text-[hsl(270_8%_42%)] md:text-lg">
+          <h1 className="mt-4 text-3xl font-semibold leading-tight sm:text-4xl md:text-6xl">Validação pública</h1>
+          <p className="mt-4 max-w-3xl text-sm leading-relaxed text-[hsl(270_8%_42%)] sm:text-base md:text-lg">
             Envie o arquivo da carteirinha de Iperó ou digite o código de validação. Apenas dados mínimos são exibidos, em conformidade com a LGPD.
           </p>
         </div>
@@ -262,7 +262,7 @@ export function Valida() {
                 <p className="mt-1 text-sm text-[hsl(270_8%_42%)]">Selecione uma imagem, print ou PDF com o QR Code visível.</p>
               </div>
               <div
-                className={`flex min-h-[380px] cursor-pointer flex-col items-center justify-center p-6 text-center transition ${
+                className={`flex min-h-[300px] cursor-pointer flex-col items-center justify-center p-4 text-center transition sm:min-h-[380px] sm:p-6 ${
                   isDragging ? 'bg-[hsl(271_52%_32%/0.08)]' : 'bg-white/35 hover:bg-white/55'
                 }`}
                 onDragOver={handleDragOver}
@@ -270,15 +270,15 @@ export function Valida() {
                 onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
               >
-                <input type="file" accept="image/*,application/pdf" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
-                <div className="flex h-80 w-full max-w-80 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[hsl(270_15%_84%)] bg-[hsl(30_25%_98%/0.72)] px-8">
-                  <Upload className="h-14 w-14 text-[hsl(271_52%_32%)]" />
+                <input type="file" accept="image/*,application/pdf" capture="environment" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
+                <div className="flex h-56 w-full max-w-80 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[hsl(270_15%_84%)] bg-[hsl(30_25%_98%/0.72)] px-6 sm:h-80 sm:px-8">
+                  <Upload className="h-12 w-12 text-[hsl(271_52%_32%)] sm:h-14 sm:w-14" />
                   <p className="mt-5 text-sm font-semibold text-[hsl(270_25%_14%)]">Arraste o arquivo aqui</p>
                   <p className="mt-1 text-xs text-[hsl(270_8%_42%)]">Imagem ou PDF com QR Code visível.</p>
                 </div>
                 <p className="mt-5 font-medium text-[hsl(270_25%_14%)]">Arquivo da carteirinha</p>
                 <p className="mt-1 text-xs text-[hsl(270_8%_42%)]">Selecione foto, print ou PDF para leitura do QR Code.</p>
-                <Button className="pointer-events-none mt-5 rounded-md bg-[hsl(271_52%_32%)] text-white hover:bg-[hsl(271_52%_26%)]" size="lg">
+                <Button className="pointer-events-none mt-5 w-full max-w-72 rounded-md bg-[hsl(271_52%_32%)] text-white hover:bg-[hsl(271_52%_26%)] sm:w-auto" size="lg">
                   <Upload className="mr-2 h-4 w-4" />
                   Selecionar arquivo
                 </Button>
@@ -296,7 +296,7 @@ export function Valida() {
                     placeholder="CIPF-7K2M-9A3X-4P8Q"
                     value={manualCode}
                     onChange={(event) => setManualCode(event.target.value.toUpperCase())}
-                    className="h-12 rounded-md border-[hsl(270_15%_86%)] bg-white/80 text-center font-mono uppercase tracking-[0.18em] focus-visible:ring-[hsl(271_52%_32%/0.25)]"
+                    className="h-12 rounded-md border-[hsl(270_15%_86%)] bg-white/80 text-center font-mono text-sm uppercase tracking-[0.08em] focus-visible:ring-[hsl(271_52%_32%/0.25)] sm:tracking-[0.18em]"
                     required
                   />
                   <Button type="submit" className="h-11 w-full rounded-md bg-[hsl(271_52%_32%)] text-white hover:bg-[hsl(271_52%_26%)]">

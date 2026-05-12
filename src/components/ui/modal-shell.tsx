@@ -56,7 +56,7 @@ export function ModalShell({
   if (!open) return null;
 
   return createPortal(
-    <div className={`fixed inset-0 z-[1000] flex items-start justify-center overflow-y-auto overscroll-contain p-4 sm:items-center ${overlayClassName}`}>
+    <div className={`fixed inset-0 z-[1000] flex items-end justify-center overflow-y-auto overscroll-contain p-0 sm:items-center sm:p-4 ${overlayClassName}`}>
       <button
         type="button"
         aria-label="Fechar modal"
@@ -69,10 +69,10 @@ export function ModalShell({
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"
-        className={`relative my-0 flex max-h-[calc(100dvh-32px)] w-full ${sizeClass[size]} flex-col overflow-hidden rounded-2xl border border-[var(--border-soft)] bg-white shadow-[0_24px_70px_rgba(7,29,65,0.18)]`}
+        className={`relative my-0 flex max-h-[100dvh] w-full ${sizeClass[size]} flex-col overflow-hidden rounded-t-2xl border border-[var(--border-soft)] bg-white shadow-[0_24px_70px_rgba(7,29,65,0.18)] sm:max-h-[calc(100dvh-32px)] sm:rounded-2xl`}
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] p-5">
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] p-4 sm:items-center sm:gap-4 sm:p-5">
           <div>
             <h3 id="modal-title" className="cipf-title text-lg leading-tight">
               {title}
@@ -83,10 +83,10 @@ export function ModalShell({
             <X className="h-4 w-4" />
           </Button>
         </header>
-        <div ref={bodyRef} className="flex-1 overflow-y-auto p-5">
+        <div ref={bodyRef} className="flex-1 overflow-y-auto p-4 sm:p-5">
           {children}
         </div>
-        {footer && <footer className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--surface-soft)] p-5">{footer}</footer>}
+        {footer && <footer className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--surface-soft)] p-4 sm:p-5">{footer}</footer>}
       </section>
     </div>,
     document.body

@@ -79,14 +79,14 @@ export function DashboardModals(props: Props) {
       {modal.confirmAction && <ConfirmModal config={modal.confirmAction} onClose={() => setModal({ confirmAction: null })} onConfirm={props.onConfirmAction} />}
       {modal.previewReg && (
         <ModalShell open onClose={() => setModal({ previewReg: null })} title="Pre-visualizacao da Carteirinha" size="xl">
-          <div className="flex min-h-[460px] justify-center overflow-x-auto rounded-xl bg-gray-50/50 px-3 py-8 sm:px-6">
+          <div className="flex min-h-[420px] justify-center overflow-x-auto rounded-xl bg-gray-50/50 px-1 py-5 sm:min-h-[460px] sm:px-6 sm:py-8">
             {props.isPreviewLoading ? (
               <div className="flex flex-col items-center justify-center text-[#86868B]">
                 <Loader2 className="mb-3 h-8 w-8 animate-spin text-indigo-600" />
                 <p>Carregando foto e dados...</p>
               </div>
             ) : (
-              <div className="origin-top scale-[0.85] sm:scale-100">
+              <div className="origin-top scale-[0.72] sm:scale-100">
                 <CarteirinhaPreview registration={modal.previewReg} photoDataUri={props.previewPhotoUri} />
                 <Button className="mt-5 w-full" onClick={() => props.onPreviewPrint(modal.previewReg!)}>
                   Emitir / ir para impressao
@@ -116,17 +116,17 @@ function DetailModal(props: Props & { reg: CIPFRegistration }) {
             <span className={`w-fit rounded-full border px-3 py-1 text-xs font-black uppercase ${getStatusBadgeClass(reg.status)}`}>{getStatusLabel(reg.status)}</span>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => props.onCopySummary(reg)}><Copy className="mr-2 h-4 w-4" />Copiar resumo</Button>
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          <Button variant="outline" onClick={() => props.onCopySummary(reg)} className="h-11"><Copy className="mr-2 h-4 w-4" />Copiar</Button>
           {canUseOperationalActions && toDigits(reg.phone || '') && <Button variant="success" onClick={() => {
             const template = normalizeRegistrationStatus(reg.status) === 'issued' ? 'pickup' : 'approved';
             setModal({ whatsAppDraft: { reg, template, message: buildWhatsAppMessage(reg, template) } });
-          }}><MessageCircle className="mr-2 h-4 w-4" />WhatsApp</Button>}
-          {props.permissions.canApproveRegistration && canApproveStatus(reg.status) && <Button onClick={() => props.onWorkflow('approve', reg)}>Aprovar</Button>}
-          {props.permissions.canIssueRegistration && props.permissions.canPrintCarteirinha && canIssueStatus(reg.status) && <Button onClick={() => props.onWorkflow('issue', reg)} variant="success">Emitir</Button>}
-          {props.permissions.canRenewRegistration && canRenewStatus(reg.status) && <Button variant="outline" onClick={() => props.onWorkflow('renew', reg)}>Renovar</Button>}
-          {props.permissions.canReissueRegistration && canReissueStatus(reg.status) && <Button variant="outline" onClick={() => props.onWorkflow('reissue', reg)}>2a via</Button>}
-          {props.permissions.canCancelRegistration && canCancelStatus(reg.status) && <Button variant="outline" className="border-red-200 text-red-700" onClick={() => props.onWorkflow('cancel', reg)}>Cancelar</Button>}
+          }} className="h-11"><MessageCircle className="mr-2 h-4 w-4" />WhatsApp</Button>}
+          {props.permissions.canApproveRegistration && canApproveStatus(reg.status) && <Button onClick={() => props.onWorkflow('approve', reg)} className="h-11">Aprovar</Button>}
+          {props.permissions.canIssueRegistration && props.permissions.canPrintCarteirinha && canIssueStatus(reg.status) && <Button onClick={() => props.onWorkflow('issue', reg)} variant="success" className="h-11">Emitir</Button>}
+          {props.permissions.canRenewRegistration && canRenewStatus(reg.status) && <Button variant="outline" onClick={() => props.onWorkflow('renew', reg)} className="h-11">Renovar</Button>}
+          {props.permissions.canReissueRegistration && canReissueStatus(reg.status) && <Button variant="outline" onClick={() => props.onWorkflow('reissue', reg)} className="h-11">2a via</Button>}
+          {props.permissions.canCancelRegistration && canCancelStatus(reg.status) && <Button variant="outline" className="h-11 border-red-200 text-red-700" onClick={() => props.onWorkflow('cancel', reg)}>Cancelar</Button>}
         </div>
         <div className="rounded-2xl border border-[#d9e1ea] bg-white p-4">
           <p className="text-sm font-black text-[#17324d]">Checklist documental</p>
@@ -154,10 +154,10 @@ function DetailModal(props: Props & { reg: CIPFRegistration }) {
             <>
               <div className="mb-3 flex items-start gap-3"><StickyNote className="h-5 w-5 text-[#7b2cbf]" /><div><p className="text-sm font-black text-[#17324d]">Observacao interna</p><p className="text-sm text-[#617184]">Notas ficam no historico auditavel.</p></div></div>
               <textarea value={props.internalNote} onChange={(e) => props.setInternalNote(e.target.value)} className="min-h-[92px] w-full rounded-xl border border-[#d9e1ea] bg-[#f8fafc] px-3 py-2 text-sm" />
-              <Button variant="outline" onClick={props.onAddInternalNote} disabled={!props.internalNote.trim()} className="mt-3">Registrar observacao</Button>
+              <Button variant="outline" onClick={props.onAddInternalNote} disabled={!props.internalNote.trim()} className="mt-3 w-full sm:w-auto">Registrar observacao</Button>
             </>
           )}
-          <Button variant="outline" onClick={() => props.onOpenHistory(reg)} className={canUseOperationalActions ? 'ml-2 mt-3' : ''}><CalendarClock className="mr-2 h-4 w-4" />Historico</Button>
+          <Button variant="outline" onClick={() => props.onOpenHistory(reg)} className={canUseOperationalActions ? 'mt-3 w-full sm:ml-2 sm:w-auto' : 'w-full sm:w-auto'}><CalendarClock className="mr-2 h-4 w-4" />Historico</Button>
         </div>
       </div>
     </ModalShell>
@@ -185,7 +185,7 @@ function EditModal({ reg, form, updateEditField, saveEdit, isSavingEdit, setModa
         <Field label="Emissao" value={form.issueDate} onChange={(value) => updateEditField('issueDate', value)} />
         <Field label="Validade" value={form.expiryDate} onChange={(value) => updateEditField('expiryDate', value)} />
       </div>
-      <div className="mt-6 flex justify-end gap-2"><Button variant="ghost" onClick={() => setModal({ editReg: null })}>Cancelar</Button><Button onClick={saveEdit} disabled={isSavingEdit}>{isSavingEdit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Salvar</Button></div>
+      <div className="sticky bottom-0 -mx-4 mt-6 grid grid-cols-2 gap-2 border-t border-[#ece7f3] bg-white p-4 sm:-mx-5 sm:flex sm:justify-end sm:px-5"><Button variant="ghost" onClick={() => setModal({ editReg: null })}>Cancelar</Button><Button onClick={saveEdit} disabled={isSavingEdit}>{isSavingEdit ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Salvar</Button></div>
     </ModalShell>
   );
 }

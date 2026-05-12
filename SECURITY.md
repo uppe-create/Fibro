@@ -71,11 +71,12 @@ Nunca coloque estes itens em `VITE_*`, README, SECURITY, AI_HANDOFF ou codigo ve
 
 ## Antes de Uso Real com Dados Sensiveis
 
-1. Confirmar senha/perfil do atendente e testar acesso real.
-2. Testar cadastro completo com Supabase Auth e Storage privado.
-3. Criar usuario `viewer`, se o fluxo operacional exigir consulta interna.
-4. Rodar `supabase/tests/rls_profile_smoke.sql` apos cada alteracao de RLS.
-5. Remover qualquer credencial local de teste antes de uso oficial.
+1. Confirmar MFA ativo para admin e validar sessao `aal2`.
+2. Confirmar senha/perfil do atendente e testar acesso real.
+3. Testar cadastro completo com Supabase Auth e Storage privado.
+4. Criar usuario `viewer`, se o fluxo operacional exigir consulta interna.
+5. Rodar `supabase/tests/rls_profile_smoke.sql` apos cada alteracao de RLS.
+6. Remover qualquer credencial local de teste antes de uso oficial.
 
 ## Riscos Ainda Nao Resolvidos
 

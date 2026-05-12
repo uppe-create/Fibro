@@ -131,12 +131,12 @@ function MobileCard(props: Omit<Props, 'registrations' | 'isLoading'> & { reg: C
   return (
     <div className={`cipf-subpanel p-4 ${getExpiryHighlight(reg)}`}>
       <div className="flex items-start justify-between gap-2">
-        <div className="flex gap-3">
+        <div className="flex min-w-0 gap-3">
           <Initials name={reg.fullName} />
-          <div>
-            <p className="text-sm font-bold text-[#170b24]">{reg.fullName}</p>
+          <div className="min-w-0">
+            <p className="break-words text-sm font-bold leading-5 text-[#170b24]">{reg.fullName}</p>
             <p className="text-xs text-[#6f617b]">{maskCpf(reg.cpf)}</p>
-            <p className="text-xs text-[#6f617b]">{reg.bairro || '-'}</p>
+            <p className="text-xs text-[#6f617b]">{reg.bairro || '-'} - Validade {reg.expiryDate || '-'}</p>
           </div>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -144,23 +144,25 @@ function MobileCard(props: Omit<Props, 'registrations' | 'isLoading'> & { reg: C
           {isReadyToPrint(reg) && <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-black uppercase text-green-800">Pronto p/ imprimir</span>}
         </div>
       </div>
-      <div className="mt-3">
-        <ActionButtons {...props} permissions={permissions} />
+      <div className="mt-4 border-t border-[#ece7f3] pt-3">
+        <ActionButtons {...props} permissions={permissions} mobile />
       </div>
     </div>
   );
 }
 
-function ActionButtons({ reg, permissions, onPreview, onDetails, onEdit, onDocument, onHistory, onDelete }: Omit<Props, 'registrations' | 'isLoading'> & { reg: CIPFRegistration }) {
+function ActionButtons({ reg, permissions, onPreview, onDetails, onEdit, onDocument, onHistory, onDelete, mobile = false }: Omit<Props, 'registrations' | 'isLoading'> & { reg: CIPFRegistration; mobile?: boolean }) {
+  const wrapperClass = mobile ? 'grid grid-cols-4 gap-2' : 'flex flex-wrap justify-end gap-1';
+  const buttonClass = mobile ? 'dashboard-action-button h-11 w-full rounded-xl' : 'dashboard-action-button';
   return (
-    <div className="flex flex-wrap justify-end gap-1">
-      {permissions.canPrintCarteirinha && isPrintableStatus(reg.status) && <Button variant="ghost" size="icon" onClick={() => onPreview(reg)} aria-label="Pré-visualizar carteirinha" title="Carteirinha" className="dashboard-action-button"><FileBadge2 className="dashboard-action-icon h-4 w-4" /></Button>}
-      <Button variant="ghost" size="icon" onClick={() => onDetails(reg)} aria-label="Ver detalhes" title="Ver detalhes" className="dashboard-action-button"><Eye className="dashboard-action-icon h-4 w-4" /></Button>
-      {permissions.canEditRegistration && <Button variant="ghost" size="icon" onClick={() => onEdit(reg)} aria-label="Editar cadastro" title="Editar" className="dashboard-action-button"><Pencil className="dashboard-action-icon h-4 w-4" /></Button>}
-      {permissions.canViewDocuments && <Button variant="ghost" size="icon" onClick={() => onDocument(reg)} aria-label="Abrir laudo" title="Laudo" className="dashboard-action-button"><FileText className="dashboard-action-icon h-4 w-4" /></Button>}
-      {permissions.canViewHistory && <Button variant="ghost" size="icon" onClick={() => onHistory(reg)} aria-label="Ver histórico" title="Histórico" className="dashboard-action-button"><CalendarClock className="dashboard-action-icon h-4 w-4" /><ShieldAlert className="hidden" /></Button>}
-      {permissions.canDeleteRegistration && <Button variant="ghost" size="icon" onClick={() => onDelete(reg)} aria-label="Arquivar cadastro" title="Arquivar" className="dashboard-action-button"><Trash2 className="dashboard-action-icon h-4 w-4 text-red-600" /></Button>}
-      <MoreHorizontal className="mt-2 h-4 w-4 text-[#6f617b]" />
+    <div className={wrapperClass}>
+      {permissions.canPrintCarteirinha && isPrintableStatus(reg.status) && <Button variant="ghost" size="icon" onClick={() => onPreview(reg)} aria-label="Pre-visualizar carteirinha" title="Carteirinha" className={buttonClass}><FileBadge2 className="dashboard-action-icon h-4 w-4" /></Button>}
+      <Button variant="ghost" size="icon" onClick={() => onDetails(reg)} aria-label="Ver detalhes" title="Ver detalhes" className={buttonClass}><Eye className="dashboard-action-icon h-4 w-4" /></Button>
+      {permissions.canEditRegistration && <Button variant="ghost" size="icon" onClick={() => onEdit(reg)} aria-label="Editar cadastro" title="Editar" className={buttonClass}><Pencil className="dashboard-action-icon h-4 w-4" /></Button>}
+      {permissions.canViewDocuments && <Button variant="ghost" size="icon" onClick={() => onDocument(reg)} aria-label="Abrir laudo" title="Laudo" className={buttonClass}><FileText className="dashboard-action-icon h-4 w-4" /></Button>}
+      {permissions.canViewHistory && <Button variant="ghost" size="icon" onClick={() => onHistory(reg)} aria-label="Ver historico" title="Historico" className={buttonClass}><CalendarClock className="dashboard-action-icon h-4 w-4" /><ShieldAlert className="hidden" /></Button>}
+      {permissions.canDeleteRegistration && <Button variant="ghost" size="icon" onClick={() => onDelete(reg)} aria-label="Arquivar cadastro" title="Arquivar" className={buttonClass}><Trash2 className="dashboard-action-icon h-4 w-4 text-red-600" /></Button>}
+      {!mobile && <MoreHorizontal className="mt-2 h-4 w-4 text-[#6f617b]" />}
     </div>
   );
 }
