@@ -1,85 +1,44 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  ArrowRight,
   BadgeCheck,
   CalendarDays,
   CheckCircle2,
-  Fingerprint,
   Loader2,
-  ShieldCheck,
+  MapPin,
+  QrCode,
   Upload,
   XCircle
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { daysUntil } from '@/lib/date';
 import { getStatusLabel, isPubliclyValidStatus } from '@/lib/registration-status';
-import prefeituraLogo from '@/assets/prefeitura-logo.png';
-
-// Public QR Code validation screen. Keep this privacy-preserving: do not query
-// registrations/documents here, only public_validations or validate_cipf.
-type ValidationStatus = 'idle' | 'loading' | 'valid' | 'invalid' | 'error';
-
-type PublicValidationData = {
-  id: string;
-  fullName: string;
-  cpfMasked: string;
-  issueDate: string;
-  expiryDate: string;
-  status: 'active' | 'expired' | 'pending' | string;
-  visualSignature?: string;
-  checksum?: string;
-};
-
-function getValiditySummary(data: PublicValidationData | null) {
-  if (!data?.expiryDate) return 'Validade nao informada.';
-  const days = daysUntil(data.expiryDate);
-  if (days === null) return 'Validade em formato invalido.';
-  if (days < 0) return `Venceu ha ${Math.abs(days)} dia(s).`;
-  if (days === 0) return 'Vence hoje.';
-  return `Valida por mais ${days} dia(s).`;
-}
-
-async function fetchPublicValidation(cleanId: string, cleanSig: string) {
-  // Production path: this RPC only returns data when id + signature match.
-  const { data: rpcData, error: rpcError } = await supabase
-    .rpc('validate_cipf', { p_id: cleanId, p_sig: cleanSig })
-    .maybeSingle();
-
-  if (!rpcError) {
-    return { data: rpcData as PublicValidationData | null, signatureCheckedByDb: true };
-  }
-
-  // Compatibility path while the production hardening SQL has not been applied.
-  if (!['PGRST202', '42883'].includes((rpcError as any)?.code)) {
-    console.warn('Falha no RPC validate_cipf, usando fallback temporario:', rpcError.message);
-  }
-
-  const { data: tableData, error: tableError } = await supabase
-    .from('public_validations')
-    .select('id,fullName,cpfMasked,issueDate,expiryDate,status,visualSignature,checksum')
-    .eq('id', cleanId)
-    .maybeSingle();
-
-  if (tableError) throw tableError;
-  return { data: tableData as PublicValidationData | null, signatureCheckedByDb: false };
-}
+import {
+  fetchPublicValidation,
+  formatDisplaySignature,
+  getValiditySummary,
+  normalizeManualRegistryCode,
+  normalizeSignature,
+  type PublicValidationData,
+  type ValidationStatus
+} from '@/modules/valida/lib/publicValidation';
+import { scanValidationQrFile } from '@/modules/valida/lib/qrScanner';
+import { useAppStore } from '@/store/useAppStore';
+import heroImg from '@/assets/landing-hero.jpg';
 
 export function Valida() {
+  const setActiveTab = useAppStore((state) => state.setActiveTab);
   const [status, setStatus] = useState<ValidationStatus>('idle');
   const [data, setData] = useState<PublicValidationData | null>(null);
   const [invalidReason, setInvalidReason] = useState('');
-  const [manualId, setManualId] = useState('');
-  const [manualSig, setManualSig] = useState('');
-  const [showManual, setShowManual] = useState(false);
+  const [manualCode, setManualCode] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [consultedAt, setConsultedAt] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const checkRateLimit = () => {
-    // Client-side throttle is UX protection, not hard security. Add backend
-    // rate limiting before heavy public use.
     const now = Date.now();
     const attemptsStr = localStorage.getItem('validationAttempts');
     let attempts: number[] = [];
@@ -105,7 +64,8 @@ export function Valida() {
     }
 
     const cleanId = id.trim();
-    const cleanSig = sig.trim().toUpperCase();
+    const cleanSig = normalizeSignature(sig);
+    const registryCode = normalizeManualRegistryCode(cleanId);
 
     setStatus('loading');
     setInvalidReason('');
@@ -119,22 +79,22 @@ export function Valida() {
     }
 
     try {
-      const result = await fetchPublicValidation(cleanId, cleanSig);
+      const result = await fetchPublicValidation(registryCode, cleanSig);
       const validationData = result.data;
       setConsultedAt(new Date().toLocaleString('pt-BR'));
 
       if (!validationData) {
-        setInvalidReason('Registro nao encontrado ou assinatura digital invalida.');
+        setInvalidReason('Registro não encontrado ou assinatura digital inválida.');
         setStatus('invalid');
         return;
       }
 
       const isSigValid =
         result.signatureCheckedByDb ||
-        String(validationData.visualSignature || '').trim().toUpperCase() === cleanSig;
+        normalizeSignature(String(validationData.visualSignature || '')).startsWith(cleanSig);
 
       if (!isSigValid) {
-        setInvalidReason('A assinatura digital nao confere com os registros oficiais.');
+        setInvalidReason('A assinatura digital não confere com os registros oficiais.');
         setStatus('invalid');
         return;
       }
@@ -149,11 +109,10 @@ export function Valida() {
         return;
       }
 
-      setInvalidReason(isExpiredByDate ? 'Documento expirado por validade vencida.' : 'Documento ainda nao foi emitido ou nao esta ativo no sistema.');
+      setInvalidReason(isExpiredByDate ? 'Documento expirado por validade vencida.' : 'Documento ainda não foi emitido ou não está ativo no sistema.');
       setStatus('invalid');
-    } catch (error) {
-      console.error('Validation error:', error);
-      setInvalidReason('Nao foi possivel comunicar com o servidor de validacao.');
+    } catch {
+      setInvalidReason('Não foi possível comunicar com o servidor de validação.');
       setStatus('error');
     }
   };
@@ -171,59 +130,31 @@ export function Valida() {
   useEffect(() => {
     switch (status) {
       case 'valid':
-        document.title = 'CIPF valida';
+        document.title = 'CIPF válida';
         break;
       case 'invalid':
-        document.title = 'CIPF invalida';
+        document.title = 'CIPF inválida';
         break;
       case 'loading':
         document.title = 'Validando CIPF...';
         break;
       case 'error':
-        document.title = 'Erro na validacao';
+        document.title = 'Erro na validação';
         break;
       default:
-        document.title = 'Validacao publica da CIPF';
+        document.title = 'Validação pública da CIPF';
     }
   }, [status]);
 
   const handleManualValidation = (event: React.FormEvent) => {
     event.preventDefault();
-    validate(manualId, manualSig);
-  };
-
-  const extractImageFromPdf = async (file: File): Promise<File | null> => {
-    // QR scanner accepts images. For PDF uploads we rasterize page 1 and scan it.
-    try {
-      const pdfjsLib = await import('pdfjs-dist');
-      const pdfWorker = await import('pdfjs-dist/build/pdf.worker.mjs?url');
-      pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker.default;
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      const page = await pdf.getPage(1);
-      const viewport = page.getViewport({ scale: 2 });
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      if (!context) return null;
-
-      canvas.height = viewport.height;
-      canvas.width = viewport.width;
-
-      await page.render({
-        canvas,
-        canvasContext: context,
-        viewport
-      }).promise;
-
-      return new Promise((resolve) => {
-        canvas.toBlob((blob) => {
-          resolve(blob ? new File([blob], 'pdf-page.png', { type: 'image/png' }) : null);
-        }, 'image/png');
-      });
-    } catch (error) {
-      console.error('Error extracting image from PDF:', error);
-      return null;
+    const parsed = parseManualCode(manualCode);
+    if (!parsed) {
+      setInvalidReason('Informe o Registro CIPF junto com o código manual impresso na carteirinha.');
+      setStatus('error');
+      return;
     }
+    validate(parsed.id, parsed.sig);
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement> | React.DragEvent<HTMLDivElement>, droppedFile?: File) => {
@@ -234,33 +165,11 @@ export function Valida() {
     setInvalidReason('');
 
     try {
-      let fileToScan = file;
-
-      if (file.type === 'application/pdf') {
-        const extractedImage = await extractImageFromPdf(file);
-        if (!extractedImage) throw new Error('Nao foi possivel processar o PDF.');
-        fileToScan = extractedImage;
-      }
-
-      const { Html5Qrcode } = await import('html5-qrcode');
-      const html5QrCode = new Html5Qrcode('qr-reader-hidden');
-      const decodedText = await html5QrCode.scanFile(fileToScan, true);
-      const url = new URL(decodedText);
-      const id = url.searchParams.get('id');
-      const sig = url.searchParams.get('sig');
-
-      if (!id || !sig) {
-        setInvalidReason('QR Code invalido. Nao foi possivel extrair os dados da carteirinha.');
-        setStatus('invalid');
-        return;
-      }
-
-      setManualId(id);
-      setManualSig(sig);
+      const { id, sig } = await scanValidationQrFile(file, 'qr-reader-hidden');
+      setManualCode(`${id}/${sig}`);
       await validate(id, sig);
     } catch (error) {
-      console.error('Error scanning file', error);
-      setInvalidReason('Nao foi possivel ler o QR Code. Tente enviar uma imagem mais nitida.');
+      setInvalidReason((error as Error)?.message || 'Não foi possível ler o QR Code. Tente enviar uma imagem mais nítida.');
       setStatus('error');
     } finally {
       if (fileInputRef.current) {
@@ -292,207 +201,265 @@ export function Valida() {
     setStatus('idle');
     setData(null);
     setInvalidReason('');
-    setManualId('');
-    setManualSig('');
-    setShowManual(false);
+    setManualCode('');
     setConsultedAt('');
     window.history.replaceState({}, document.title, window.location.pathname);
   };
 
   const isValid = status === 'valid';
+  const receiptCode = data?.id ? data.id.replace(/-/g, '').slice(0, 8).toUpperCase() : '';
 
   return (
-    <div className="min-h-[80vh] px-4 py-8 animate-in fade-in duration-500">
+    <div className="lovable-home cipf-page relative min-h-screen overflow-hidden bg-[hsl(30_25%_98%)] text-[hsl(270_25%_14%)]">
+      <div className="absolute inset-0 -z-10">
+        <img src={heroImg} alt="" className="h-full w-full scale-110 object-cover opacity-60 blur-[1px]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[hsl(30_25%_98%/0.72)] via-[hsl(30_25%_98%/0.90)] to-[hsl(30_25%_98%)]" />
+      </div>
       <div id="qr-reader-hidden" className="hidden" />
 
-      <div className="mx-auto flex w-full max-w-4xl flex-col items-center">
-        <section className="w-full overflow-hidden border border-[#d9e1ea] bg-white shadow-[0_18px_55px_rgba(23,50,77,0.08)]">
-          <div className="h-1.5 bg-[linear-gradient(90deg,#155c9c_0%,#155c9c_42%,#1f8a58_42%,#1f8a58_78%,#f2c94c_78%,#f2c94c_100%)]" />
-
-          <div className="px-5 py-8 text-center sm:px-10 sm:py-10">
-            <div className="mx-auto mb-6 flex h-16 w-40 items-center justify-center bg-white px-3">
-              <img src={prefeituraLogo} alt="Prefeitura de Ipero" className="max-h-12 w-auto object-contain" />
+      <header className="relative z-10 border-b border-[hsl(270_15%_90%/0.75)] bg-[hsl(30_25%_98%/0.72)] backdrop-blur-xl">
+        <div className="mx-auto flex h-20 max-w-[1240px] items-center justify-between px-4 md:px-8">
+          <button type="button" onClick={() => setActiveTab('inicio')} className="flex items-center">
+            <div className="leading-tight">
+              <div className="lovable-display text-base font-semibold">CIPF</div>
+              <div className="text-[10px] uppercase tracking-[0.16em] text-[hsl(270_8%_42%)]">Iperó · Carteirinha Municipal</div>
             </div>
+          </button>
 
-            <div className="mb-4 inline-flex items-center gap-2 border border-[#d9e1ea] bg-[#f8fafc] px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] text-[#526579]">
-              <ShieldCheck className="h-3.5 w-3.5 text-[#1f8a58]" />
-              Consulta oficial
-            </div>
+          <nav className="flex items-center gap-4 text-sm text-[hsl(270_25%_14%/0.70)] sm:gap-7">
+            <button type="button" onClick={() => setActiveTab('inicio')} className="transition hover:text-[hsl(270_25%_14%)]">
+              Início
+            </button>
+            <button type="button" onClick={() => setActiveTab('validar')} className="font-semibold text-[hsl(271_52%_32%)]">
+              Validar
+            </button>
+            <Button type="button" size="sm" onClick={() => setActiveTab('configuracoes')} className="h-9 rounded-md">
+              Entrar <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          </nav>
+        </div>
+      </header>
 
-            <h2 className="mx-auto max-w-2xl text-3xl font-black leading-tight text-[#17324d] sm:text-4xl">
-              Validar Carteirinha de Fibromialgia
-            </h2>
-            <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#617184]">
-              Confira se a CIPF apresentada foi emitida pela Prefeitura de Ipero e se ainda esta valida.
-            </p>
+      <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-10 md:px-8 md:py-14">
+        <div className="border-b border-[hsl(270_15%_90%)] pb-8">
+          <div className="text-xs font-semibold text-[hsl(270_8%_42%)]">
+            <button type="button" onClick={() => setActiveTab('inicio')} className="font-bold hover:text-[hsl(271_52%_32%)]">
+              Início
+            </button>
+            <span> / Validação pública</span>
           </div>
+          <h1 className="mt-4 text-4xl font-semibold leading-tight md:text-6xl">Validação pública</h1>
+          <p className="mt-4 max-w-3xl text-base leading-relaxed text-[hsl(270_8%_42%)] md:text-lg">
+            Envie o arquivo da carteirinha de Iperó ou digite o código de validação. Apenas dados mínimos são exibidos, em conformidade com a LGPD.
+          </p>
+        </div>
 
-          <div className="border-t border-[#e3e9ef] bg-[#f8fafc] px-5 py-6 sm:px-10">
-            {status === 'idle' && (
-              <div className="mx-auto max-w-xl space-y-4 animate-in zoom-in-95 duration-300">
-                <div
-                  className={`cursor-pointer border-2 border-dashed bg-white p-5 text-center transition-all duration-200 ${
-                    isDragging ? 'border-[#155c9c] bg-blue-50' : 'border-[#d8e2ec] hover:border-[#155c9c]'
-                  }`}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <input type="file" accept="image/*,application/pdf" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
-                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center bg-[#eef4f8]">
-                    <Upload className={`h-6 w-6 ${isDragging ? 'text-[#155c9c]' : 'text-[#617184]'}`} />
-                  </div>
-                  <h3 className="text-base font-black text-[#17324d]">Enviar QR Code da carteirinha</h3>
-                  <p className="mt-1 text-sm text-[#617184]">Aceita imagem ou PDF.</p>
-                  <Button className="pointer-events-none mt-4 h-11 w-full rounded-xl bg-[#17324d] text-white hover:bg-[#10263b]">
-                    Selecionar arquivo
+        {status === 'idle' && (
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="overflow-hidden rounded-2xl border border-[hsl(270_15%_90%)] bg-white/75 shadow-[0_18px_60px_hsl(270_25%_14%/0.08)] backdrop-blur">
+              <div className="border-b border-[hsl(270_15%_90%)] px-6 py-5">
+                <h3 className="text-2xl font-semibold">Enviar arquivo da carteirinha</h3>
+                <p className="mt-1 text-sm text-[hsl(270_8%_42%)]">Selecione uma imagem, print ou PDF com o QR Code visível.</p>
+              </div>
+              <div
+                className={`flex min-h-[380px] cursor-pointer flex-col items-center justify-center p-6 text-center transition ${
+                  isDragging ? 'bg-[hsl(271_52%_32%/0.08)]' : 'bg-white/35 hover:bg-white/55'
+                }`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input type="file" accept="image/*,application/pdf" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
+                <div className="flex h-80 w-full max-w-80 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-[hsl(270_15%_84%)] bg-[hsl(30_25%_98%/0.72)] px-8">
+                  <Upload className="h-14 w-14 text-[hsl(271_52%_32%)]" />
+                  <p className="mt-5 text-sm font-semibold text-[hsl(270_25%_14%)]">Arraste o arquivo aqui</p>
+                  <p className="mt-1 text-xs text-[hsl(270_8%_42%)]">Imagem ou PDF com QR Code visível.</p>
+                </div>
+                <p className="mt-5 font-medium text-[hsl(270_25%_14%)]">Arquivo da carteirinha</p>
+                <p className="mt-1 text-xs text-[hsl(270_8%_42%)]">Selecione foto, print ou PDF para leitura do QR Code.</p>
+                <Button className="pointer-events-none mt-5 rounded-md bg-[hsl(271_52%_32%)] text-white hover:bg-[hsl(271_52%_26%)]" size="lg">
+                  <Upload className="mr-2 h-4 w-4" />
+                  Selecionar arquivo
+                </Button>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-2xl border border-[hsl(270_15%_90%)] bg-white/75 shadow-[0_18px_60px_hsl(270_25%_14%/0.08)] backdrop-blur">
+              <div className="border-b border-[hsl(270_15%_90%)] px-6 py-5">
+                <h3 className="text-2xl font-semibold">Validar por código</h3>
+                <p className="mt-1 text-sm text-[hsl(270_8%_42%)]">Insira o código alfanumérico abaixo do QR Code.</p>
+              </div>
+              <div className="p-6">
+                <form onSubmit={handleManualValidation} className="space-y-3">
+                  <Input
+                    placeholder="CIPF-7K2M-9A3X-4P8Q"
+                    value={manualCode}
+                    onChange={(event) => setManualCode(event.target.value.toUpperCase())}
+                    className="h-12 rounded-md border-[hsl(270_15%_86%)] bg-white/80 text-center font-mono uppercase tracking-[0.18em] focus-visible:ring-[hsl(271_52%_32%/0.25)]"
+                    required
+                  />
+                  <Button type="submit" className="h-11 w-full rounded-md bg-[hsl(271_52%_32%)] text-white hover:bg-[hsl(271_52%_26%)]">
+                    Validar carteirinha
                   </Button>
-                </div>
+                </form>
 
-                {!showManual ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowManual(true)}
-                    className="flex w-full items-center justify-center gap-2 border border-[#d9e1ea] bg-white p-4 text-[#17324d] hover:bg-[#f8fbfd]"
-                  >
-                    <Fingerprint className="h-4 w-4 text-[#155c9c]" />
-                    <span className="font-black">Digitar codigo manualmente</span>
-                  </button>
-                ) : (
-                  <form onSubmit={handleManualValidation} className="space-y-4 border border-[#e3e9ef] bg-white p-5 text-left">
-                    <label className="block space-y-1.5">
-                      <span className="ml-1 text-xs font-bold uppercase tracking-wide text-[#617184]">Registro CIPF</span>
-                      <Input placeholder="ID impresso no QR Code" value={manualId} onChange={(event) => setManualId(event.target.value)} className="h-12 rounded-xl bg-white" required />
-                    </label>
-                    <label className="block space-y-1.5">
-                      <span className="ml-1 text-xs font-bold uppercase tracking-wide text-[#617184]">Assinatura digital</span>
-                      <Input placeholder="Ex: ABC123" value={manualSig} onChange={(event) => setManualSig(event.target.value)} className="h-12 rounded-xl bg-white font-mono uppercase" required />
-                    </label>
-                    <div className="flex gap-3 pt-1">
-                      <Button type="button" variant="ghost" onClick={() => setShowManual(false)} className="h-12 flex-1 rounded-xl">
-                        Cancelar
-                      </Button>
-                      <Button type="submit" className="h-12 flex-1 rounded-xl bg-[#17324d] text-white hover:bg-[#10263b]">
-                        Validar
-                      </Button>
-                    </div>
-                  </form>
-                )}
-              </div>
-            )}
-
-            {status === 'loading' && (
-              <div className="flex min-h-[300px] flex-col items-center justify-center gap-4">
-                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-blue-50 text-[#155c9c]">
-                  <Loader2 className="h-10 w-10 animate-spin" />
-                </div>
-                <div className="text-center">
-                  <p className="font-bold text-[#17324d]">Validando autenticidade...</p>
-                  <p className="text-sm text-[#617184]">Consultando o registro publico oficial.</p>
-                </div>
-              </div>
-            )}
-
-            {(status === 'valid' || status === 'invalid') && (
-              <div className="mx-auto max-w-2xl space-y-5 animate-in zoom-in-95 duration-500">
-                <div className={`border bg-white p-5 ${isValid ? 'border-green-200 text-green-900' : 'border-red-200 text-red-900'}`}>
-                  <div className="flex items-start gap-4">
-                    <div className={`flex h-14 w-14 shrink-0 items-center justify-center ${isValid ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
-                      {isValid ? <CheckCircle2 className="h-8 w-8" /> : <XCircle className="h-8 w-8" />}
+                <div className="mt-4 rounded-2xl border border-[hsl(270_15%_90%)] bg-[hsl(270_15%_96%/0.45)] p-5">
+                  <div className="mb-4 flex items-center gap-2 text-[hsl(270_8%_42%)]">
+                    <QrCode className="h-5 w-5" />
+                    <p className="font-bold">Aguardando validação</p>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <p className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-[hsl(270_8%_42%)]">
+                        <QrCode className="h-4 w-4" /> Titular
+                      </p>
+                      <p className="font-bold text-[hsl(270_25%_14%)]">Insira os dados acima</p>
                     </div>
                     <div>
-                      <p className="text-xs font-black uppercase tracking-[0.22em]">{isValid ? 'Documento valido' : 'Documento nao validado'}</p>
-                      <h3 className="mt-1 text-2xl font-black">{isValid ? 'Carteirinha autentica' : 'Nao foi possivel validar'}</h3>
-                      <p className="mt-1 text-sm opacity-85">
-                        {isValid ? 'A assinatura confere com a base publica oficial.' : invalidReason || 'Confira o QR Code ou o codigo informado.'}
+                      <p className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-[hsl(270_8%_42%)]">
+                        <CalendarDays className="h-4 w-4" /> Validade
                       </p>
+                      <p className="font-bold text-[hsl(270_25%_14%)]">ou faça o upload</p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <p className="mb-1 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wide text-[hsl(270_8%_42%)]">
+                        <MapPin className="h-4 w-4" /> Município
+                      </p>
+                      <p className="font-bold text-[hsl(270_25%_14%)]">da carteirinha</p>
                     </div>
                   </div>
                 </div>
-
-                {data && (
-                  <div className="border border-[#d8e2ec] bg-white p-5">
-                    <div className="mb-4 flex items-center justify-between gap-3 border-b border-[#edf1f5] pb-4">
-                      <div>
-                        <p className="text-xs font-black uppercase tracking-[0.22em] text-[#617184]">Titular</p>
-                        <p className="mt-1 text-lg font-black uppercase leading-tight text-[#17324d]">{data.fullName}</p>
-                      </div>
-                      <div className={`rounded-full px-3 py-1 text-xs font-black uppercase ${isValid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                        {getStatusLabel(data.status)}
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div className="bg-[#f8fbfd] p-4">
-                        <p className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-[#617184]">
-                          <BadgeCheck className="h-4 w-4 text-[#1f8a58]" /> CPF
-                        </p>
-                        <p className="font-bold text-[#17324d]">{data.cpfMasked || '-'}</p>
-                      </div>
-                      <div className="bg-[#f8fbfd] p-4">
-                        <p className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-[#617184]">
-                          <CalendarDays className="h-4 w-4 text-[#155c9c]" /> Validade
-                        </p>
-                        <p className="font-bold text-[#17324d]">{data.expiryDate}</p>
-                        <p className="mt-1 text-xs text-[#617184]">{getValiditySummary(data)}</p>
-                      </div>
-                      <div className="bg-[#f8fbfd] p-4">
-                        <p className="mb-1 text-xs font-black uppercase tracking-wide text-[#617184]">Emissao</p>
-                        <p className="font-bold text-[#17324d]">{data.issueDate || '-'}</p>
-                      </div>
-                      <div className="bg-[#f8fbfd] p-4">
-                        <p className="mb-1 text-xs font-black uppercase tracking-wide text-[#617184]">Assinatura</p>
-                        <p className="font-mono text-sm font-black tracking-widest text-[#17324d]">{data.visualSignature || '------'}</p>
-                      </div>
-                      <div className="bg-[#f8fbfd] p-4 sm:col-span-2">
-                        <p className="mb-1 text-xs font-black uppercase tracking-wide text-[#617184]">Consulta realizada em</p>
-                        <p className="font-bold text-[#17324d]">{consultedAt || '-'}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {!data && status === 'invalid' && (
-                  <div className="border border-red-100 bg-red-50 p-4 text-sm text-red-800">
-                    <div className="flex gap-3">
-                      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
-                      <p>A consulta nao retornou dados oficiais para o codigo informado. Confira o QR Code ou a assinatura digital.</p>
-                    </div>
-                  </div>
-                )}
               </div>
-            )}
+            </div>
+          </div>
+        )}
 
-            {status === 'error' && (
-              <div className="flex min-h-[300px] flex-col items-center justify-center gap-5 text-center animate-in zoom-in-95 duration-500">
-                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-orange-50 text-orange-600">
-                  <AlertTriangle className="h-10 w-10" />
+        {status === 'loading' && (
+          <div className="flex min-h-[360px] flex-col items-center justify-center gap-4 rounded-2xl border border-[hsl(270_15%_90%)] bg-white/75 text-center shadow-[0_18px_60px_hsl(270_25%_14%/0.08)] backdrop-blur">
+            <Loader2 className="h-9 w-9 animate-spin text-[hsl(271_52%_32%)]" />
+            <div>
+              <h3 className="text-2xl font-semibold">Validando carteirinha</h3>
+              <p className="mt-2 text-sm text-[hsl(270_8%_42%)]">Consultando base pública segura.</p>
+            </div>
+          </div>
+        )}
+
+        {(status === 'valid' || status === 'invalid') && (
+          <div className="mx-auto w-full max-w-2xl space-y-5 animate-in zoom-in-95 duration-500">
+            <div className={`rounded-2xl border bg-white/80 p-5 shadow-[0_18px_60px_hsl(270_25%_14%/0.08)] backdrop-blur ${isValid ? 'border-green-200 text-green-900' : 'border-red-200 text-red-900'}`}>
+              <div className="flex items-start gap-4">
+                <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-xl ${isValid ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                  {isValid ? <CheckCircle2 className="h-8 w-8" /> : <XCircle className="h-8 w-8" />}
                 </div>
                 <div>
-                  <h3 className="text-2xl font-black text-[#17324d]">Erro na validacao</h3>
-                  <p className="mt-2 max-w-sm text-sm text-[#617184]">{invalidReason || 'Nao foi possivel processar a consulta agora.'}</p>
+                  <p className="text-xs font-black uppercase tracking-[0.22em]">{isValid ? 'Documento válido' : 'Documento não validado'}</p>
+                  <h3 className="mt-1 text-2xl font-semibold">{isValid ? 'Carteirinha autêntica' : 'Não foi possível validar'}</h3>
+                  <p className="mt-1 text-sm opacity-85">
+                    {isValid ? 'A assinatura confere com a base pública oficial.' : invalidReason || 'Confira o QR Code ou o código informado.'}
+                  </p>
                 </div>
-                <Button onClick={resetValidation} className="h-12 w-full rounded-xl bg-[#17324d] text-white hover:bg-[#10263b]">
-                  Tentar novamente
-                </Button>
+              </div>
+            </div>
+
+            {data && (
+              <div className="rounded-2xl border border-[hsl(270_15%_90%)] bg-white/80 p-5 shadow-[0_18px_60px_hsl(270_25%_14%/0.08)] backdrop-blur">
+                <div className="mb-4 flex flex-col justify-between gap-3 border-b border-[hsl(270_15%_90%)] pb-4 sm:flex-row sm:items-start">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.22em] text-[hsl(270_8%_42%)]">Comprovante de consulta</p>
+                    <p className="mt-1 text-lg font-black uppercase leading-tight text-[hsl(270_25%_14%)]">{data.fullName}</p>
+                    <p className="mt-1 text-xs text-[hsl(270_8%_42%)]">Conferência nº {receiptCode || '------'} realizada em {consultedAt || '-'}</p>
+                  </div>
+                  <div className={`rounded-full px-3 py-1 text-xs font-black uppercase ${isValid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {getStatusLabel(data.status)}
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl bg-[hsl(270_15%_96%/0.62)] p-4">
+                    <p className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-[hsl(270_8%_42%)]">
+                      <BadgeCheck className="h-4 w-4 text-[#1f8a58]" /> CPF
+                    </p>
+                    <p className="font-bold text-[hsl(270_25%_14%)]">{data.cpfMasked || '-'}</p>
+                  </div>
+                  <div className="rounded-xl bg-[hsl(270_15%_96%/0.62)] p-4">
+                    <p className="mb-1 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-[hsl(270_8%_42%)]">
+                      <CalendarDays className="h-4 w-4 text-[#155c9c]" /> Validade
+                    </p>
+                    <p className="font-bold text-[hsl(270_25%_14%)]">{data.expiryDate}</p>
+                    <p className="mt-1 text-xs text-[hsl(270_8%_42%)]">{getValiditySummary(data)}</p>
+                  </div>
+                  <div className="rounded-xl bg-[hsl(270_15%_96%/0.62)] p-4">
+                    <p className="mb-1 text-xs font-black uppercase tracking-wide text-[hsl(270_8%_42%)]">Emissão</p>
+                    <p className="font-bold text-[hsl(270_25%_14%)]">{data.issueDate || '-'}</p>
+                  </div>
+                  <div className="rounded-xl bg-[hsl(270_15%_96%/0.62)] p-4">
+                    <p className="mb-1 text-xs font-black uppercase tracking-wide text-[hsl(270_8%_42%)]">Assinatura</p>
+                    <p className="font-mono text-sm font-black tracking-widest text-[hsl(270_25%_14%)]">{formatDisplaySignature(data.visualSignature)}</p>
+                  </div>
+                  <div className="rounded-xl bg-[hsl(270_15%_96%/0.62)] p-4 sm:col-span-2">
+                    <p className="mb-1 text-xs font-black uppercase tracking-wide text-[hsl(270_8%_42%)]">Consulta realizada em</p>
+                    <p className="font-bold text-[hsl(270_25%_14%)]">{consultedAt || '-'}</p>
+                  </div>
+                </div>
               </div>
             )}
 
-            {status !== 'idle' && status !== 'error' && (
-              <div className="mx-auto mt-5 max-w-2xl">
-                <Button onClick={resetValidation} variant="outline" className="h-12 w-full rounded-xl bg-white">
-                  Fazer nova consulta
-                </Button>
+            {!data && status === 'invalid' && (
+              <div className="rounded-2xl border border-red-100 bg-red-50/90 p-4 text-sm text-red-800">
+                <div className="flex gap-3">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+                  <p>A consulta não retornou dados oficiais para o código informado. Confira o QR Code ou a assinatura digital.</p>
+                </div>
               </div>
             )}
           </div>
+        )}
 
-          <div className="border-t border-[#e3e9ef] bg-white px-5 py-4 text-center text-xs text-[#617184]">
-            A consulta exibe apenas dados publicos de validacao. Documentos e dados sensiveis permanecem protegidos.
+        {status === 'error' && (
+          <div className="flex min-h-[300px] flex-col items-center justify-center gap-5 rounded-2xl border border-[hsl(270_15%_90%)] bg-white/80 text-center shadow-[0_18px_60px_hsl(270_25%_14%/0.08)] backdrop-blur animate-in zoom-in-95 duration-500">
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-orange-50 text-orange-600">
+              <AlertTriangle className="h-10 w-10" />
+            </div>
+            <div>
+              <h3 className="text-2xl font-semibold">Erro na validação</h3>
+              <p className="mt-2 max-w-sm text-sm text-[hsl(270_8%_42%)]">{invalidReason || 'Não foi possível processar a consulta agora.'}</p>
+            </div>
+            <Button onClick={resetValidation} className="w-full max-w-sm rounded-md bg-[hsl(271_52%_32%)] text-white hover:bg-[hsl(271_52%_26%)]" size="lg">
+              Tentar novamente
+            </Button>
           </div>
-        </section>
+        )}
+
+        {status !== 'idle' && status !== 'error' && (
+          <div className="mx-auto w-full max-w-2xl">
+            <Button onClick={resetValidation} variant="outline" className="w-full rounded-md bg-white/70 backdrop-blur" size="lg">
+              Fazer nova consulta
+            </Button>
+          </div>
+        )}
+
+        <div className="text-center text-xs text-[hsl(270_8%_42%)]">
+          A consulta exibe apenas dados públicos de validação. Documentos e dados sensíveis permanecem protegidos.
+        </div>
       </div>
     </div>
   );
+}
+
+function parseManualCode(value: string): { id: string; sig: string } | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.includes('/')) {
+    const [id, sig] = trimmed.split('/');
+    if (id && sig) return { id, sig };
+  }
+
+  const clean = trimmed.replace(/^CIPF/i, '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+  if (clean.length >= 14) {
+    return { id: clean.slice(0, 8), sig: clean.slice(8, 16) };
+  }
+
+  return null;
 }

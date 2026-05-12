@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { getAgeFromBRDate, parseBRDate } from '@/lib/date';
 import { validateCPF } from '@/lib/utils';
+import { getSafeFileSecurityMessage, validateFileMetadata, validateFileSecurity } from '@/lib/file-security';
 
 export const MAX_FILE_SIZE = 5 * 1024 * 1024;
 export const CHUNK_SIZE = 700000;
@@ -28,15 +29,19 @@ export const normalizeLookupText = (value = '') =>
     .trim()
     .toUpperCase();
 
-const makeFileSchema = (label: string, acceptedTypes: string[]) =>
+const makeFileSchema = (label: string, profile: 'document' | 'photo') =>
   z
     .any()
     .refine((files) => files && files.length === 1, `${label} e obrigatorio.`)
-    .refine((files) => !files?.[0] || files[0].size <= MAX_FILE_SIZE, 'O arquivo deve ter no maximo 5MB')
-    .refine(
-      (files) => !files?.[0] || acceptedTypes.includes(files[0].type),
-      `Formato invalido para ${label.toLowerCase()}.`
-    );
+    .superRefine((files, ctx) => {
+      const file = files?.[0] as File | undefined;
+      if (!file) return;
+      try {
+        validateFileMetadata(file, profile);
+      } catch (error) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: getSafeFileSecurityMessage(error) });
+      }
+    });
 
 // Main business-rules gate before any Supabase write. Keep user-facing
 // validation messages here when adding mandatory fields.
@@ -44,14 +49,14 @@ export const cadastroSchema = z
   .object({
     fullName: z.string().min(3, 'Nome deve ter no minimo 3 caracteres').transform(normalizeText),
     cpf: z
-      .string()
-      .min(14, 'CPF invalido')
-      .refine((value) => validateCPF(value), 'CPF invalido matematicamente'),
+    .string()
+    .min(14, 'CPF invalido')
+    .refine((value) => validateCPF(value), 'CPF invalido'),
     cns: z
       .string()
       .optional()
       .transform((value) => (value ? value.replace(/\D/g, '') : ''))
-      .refine((value) => !value || value.length === 15, 'Cartao SUS deve ter 15 digitos'),
+      .refine((value) => !value || value.length === 15, 'Cartão SUS deve ter 15 dígitos'),
     phone: z.string().min(14, 'Telefone invalido'),
     birthDate: z
       .string()
@@ -69,8 +74,8 @@ export const cadastroSchema = z
     bairro: z.string().min(2, 'Bairro obrigatorio').transform(normalizeText),
     cidade: z.string().min(2, 'Cidade obrigatoria').transform(normalizeText),
     estado: z.string().length(2, 'Estado (UF) deve ter 2 letras').transform((value) => value.toUpperCase()),
-    documentFile: makeFileSchema('Documento oficial', ACCEPTED_DOC_TYPES),
-    proofOfResidenceFile: makeFileSchema('Comprovante de residencia', ACCEPTED_DOC_TYPES),
+    documentFile: makeFileSchema('Documento oficial', 'document'),
+    proofOfResidenceFile: makeFileSchema('Comprovante de residencia', 'document'),
     proofOfResidenceDate: z
       .string()
       .min(10, 'Data do comprovante invalida')
@@ -82,8 +87,8 @@ export const cadastroSchema = z
         ninetyDaysAgo.setHours(0, 0, 0, 0);
         ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
         return date <= now && date >= ninetyDaysAgo;
-      }, 'O comprovante nao pode ter mais de 90 dias.'),
-    medicalReportFile: makeFileSchema('Laudo medico', ACCEPTED_DOC_TYPES),
+      }, 'O comprovante não pode ter mais de 90 dias.'),
+    medicalReportFile: makeFileSchema('Laudo médico', 'document'),
     medicalReportDate: z
       .string()
       .min(10, 'Data do laudo invalida')
@@ -94,17 +99,17 @@ export const cadastroSchema = z
         const sixMonthsAgo = new Date(now);
         sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
         return date <= now && date >= sixMonthsAgo;
-      }, 'O laudo nao pode ter mais de 6 meses de emissao.'),
+      }, 'O laudo não pode ter mais de 6 meses de emissão.'),
     cid: z.string().min(3, 'CID obrigatorio').transform((value) => value.toUpperCase()),
     justificativaCid: z.string().optional(),
     crm: z.string().min(4, 'CRM invalido'),
-    photoFile: makeFileSchema('Foto', ACCEPTED_IMAGE_TYPES)
+    photoFile: makeFileSchema('Foto', 'photo')
   })
   .superRefine((data, ctx) => {
     if (data.cid !== CID_DEFAULT && (!data.justificativaCid || data.justificativaCid.trim().length < 10)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Justificativa medica e obrigatoria e deve ter pelo menos 10 caracteres quando o CID nao for M79.7',
+        message: 'Justificativa médica é obrigatória e deve ter pelo menos 10 caracteres quando o CID não for M79.7',
         path: ['justificativaCid']
       });
     }
@@ -123,7 +128,8 @@ export type FormData = z.infer<typeof cadastroSchema>;
 
 export const formatFileSize = (size = 0) => `${(size / 1024 / 1024).toFixed(2)} MB`;
 
-export async function fileToDataUri(file: File): Promise<string> {
+export async function fileToDataUri(file: File, profile: 'document' | 'photo' = 'document'): Promise<string> {
+  await validateFileSecurity(file, profile);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -133,7 +139,8 @@ export async function fileToDataUri(file: File): Promise<string> {
 }
 
 export async function cropImageTo3x4DataUri(file: File): Promise<string> {
-  const imageDataUri = await fileToDataUri(file);
+  await validateFileSecurity(file, 'photo');
+  const imageDataUri = await fileToDataUri(file, 'photo');
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {

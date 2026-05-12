@@ -9,7 +9,7 @@ export type RegistrationStatus =
   | LegacyRegistrationStatus;
 
 export const WORKFLOW_STATUS_OPTIONS: Array<{ value: RegistrationStatus; label: string }> = [
-  { value: 'under_review', label: 'Em analise' },
+  { value: 'under_review', label: 'Em análise' },
   { value: 'approved', label: 'Aprovada' },
   { value: 'issued', label: 'Emitida' },
   { value: 'expired', label: 'Vencida' },
@@ -17,13 +17,13 @@ export const WORKFLOW_STATUS_OPTIONS: Array<{ value: RegistrationStatus; label: 
 ];
 
 const STATUS_LABELS: Record<RegistrationStatus, string> = {
-  under_review: 'Em analise',
+  under_review: 'Em análise',
   approved: 'Aprovada',
   issued: 'Emitida',
   expired: 'Vencida',
   cancelled: 'Cancelada',
   active: 'Emitida',
-  pending: 'Em analise'
+  pending: 'Em análise'
 };
 
 const STATUS_BADGES: Record<RegistrationStatus, string> = {

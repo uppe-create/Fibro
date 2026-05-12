@@ -1,19 +1,23 @@
-import { BadgeCheck, Clock, KeyRound, ShieldCheck, UserCog } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { BadgeCheck, Clock, KeyRound, Loader2, ShieldCheck, Smartphone, UserCog } from 'lucide-react';
 import { getSessionSecurityConfig, useAppStore, type AppUser } from '@/store/useAppStore';
 import { getRoleLabel, hasPermission, type Permission, type UserRole } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
-import { isSupabaseConfigured } from '@/lib/supabase';
+import { PageHeader } from '@/components/ui/layout';
+import { assertSupabaseConfigured, isSupabaseConfigured, supabase } from '@/lib/supabase';
+import { getAuthMode } from '@/lib/auth-mode';
+import { Input } from '@/components/ui/input';
 
 const APP_VERSION = String((import.meta as any).env?.VITE_APP_VERSION || '1.0.0');
 const AUTH_MIGRATION_STATUS = 'Preparado para migrar para Supabase Auth/Backend seguro';
 const IS_PRODUCTION = Boolean((import.meta as any).env?.PROD);
 const APP_ORIGIN = typeof window !== 'undefined' ? window.location.origin : 'desconhecido';
-const AUTH_MODE = String((import.meta as any).env?.VITE_AUTH_MODE || 'local').toLowerCase();
+const AUTH_MODE = getAuthMode((import.meta as any).env || {});
 
 const TEST_USERS: Array<{ role: UserRole; name: string; description: string }> = [
   { role: 'admin', name: 'ADMINISTRADOR TESTE', description: 'Acesso total ao sistema.' },
-  { role: 'attendant', name: 'ATENDENTE TESTE', description: 'Cadastro, edicao, aprovacao e renovacao, sem impressao.' },
-  { role: 'viewer', name: 'CONSULTA TESTE', description: 'Acesso basico para validacao publica e configuracoes.' }
+  { role: 'attendant', name: 'ATENDENTE TESTE', description: 'Cadastro, edição, aprovação e renovação, sem impressão.' },
+  { role: 'viewer', name: 'CONSULTA TESTE', description: 'Acesso básico para validação pública e configurações.' }
 ];
 
 const PERMISSION_LABELS: Array<[Permission, string]> = [
@@ -29,18 +33,49 @@ const PERMISSION_LABELS: Array<[Permission, string]> = [
   ['reissueRegistration', 'Registrar segunda via'],
   ['deleteRegistration', 'Excluir cadastros'],
   ['exportDashboard', 'Exportar relatorios'],
-  ['clearDatabase', 'Limpar banco'],
+  ['clearDatabase', 'Arquivar base'],
   ['viewDocuments', 'Abrir documentos'],
-  ['viewHistory', 'Ver historico'],
-  ['viewSettings', 'Ver configuracoes'],
+  ['viewHistory', 'Ver histórico'],
+  ['viewSettings', 'Ver configurações'],
   ['useDevTools', 'Usar ferramentas dev']
 ];
 
+type MfaPanelState = {
+  loading: boolean;
+  busy: boolean;
+  currentLevel: string | null;
+  nextLevel: string | null;
+  verifiedTotpCount: number;
+  error: string;
+  success: string;
+  enrollFactorId: string;
+  enrollQr: string;
+  enrollSecret: string;
+  enrollUri: string;
+};
+
+const INITIAL_MFA_PANEL_STATE: MfaPanelState = {
+  loading: true,
+  busy: false,
+  currentLevel: null,
+  nextLevel: null,
+  verifiedTotpCount: 0,
+  error: '',
+  success: '',
+  enrollFactorId: '',
+  enrollQr: '',
+  enrollSecret: '',
+  enrollUri: ''
+};
+
 export function Configuracoes() {
-  const { currentUser, setCurrentUser, logAudit } = useAppStore();
+  const { currentUser, setCurrentUser, logAudit, logout, refreshCurrentUser } = useAppStore();
   const { idleTimeoutMs, maxSessionMs, loginMaxAttempts, lockoutMinutes } = getSessionSecurityConfig();
   const idleMinutes = Math.round(idleTimeoutMs / 60000);
   const maxHours = Math.round(maxSessionMs / 3600000);
+  const [mfaPanel, setMfaPanel] = useState<MfaPanelState>(INITIAL_MFA_PANEL_STATE);
+  const [enrollCode, setEnrollCode] = useState('');
+  const [challengeCode, setChallengeCode] = useState('');
 
   const switchUser = async (role: UserRole, name: string) => {
     const nextUser: AppUser = {
@@ -53,26 +88,166 @@ export function Configuracoes() {
     setCurrentUser(nextUser);
   };
 
+  const loadMfaState = async () => {
+    if (!currentUser || AUTH_MODE !== 'supabase') return;
+
+    setMfaPanel((state) => ({ ...state, loading: true, error: '', success: '' }));
+    try {
+      assertSupabaseConfigured();
+      const [aalResult, factorsResult] = await Promise.all([
+        supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
+        supabase.auth.mfa.listFactors()
+      ]);
+
+      if (aalResult.error) throw aalResult.error;
+      if (factorsResult.error) throw factorsResult.error;
+
+      setMfaPanel((state) => ({
+        ...state,
+        loading: false,
+        currentLevel: aalResult.data.currentLevel,
+        nextLevel: aalResult.data.nextLevel,
+        verifiedTotpCount: factorsResult.data.totp.length
+      }));
+    } catch (error: any) {
+      setMfaPanel((state) => ({
+        ...state,
+        loading: false,
+        error: error?.message || 'Não foi possível carregar o status de MFA.'
+      }));
+    }
+  };
+
+  useEffect(() => {
+    if (AUTH_MODE !== 'supabase' || !currentUser) return;
+    void loadMfaState();
+  }, [currentUser?.id, currentUser?.role]);
+
+  const startMfaEnrollment = async () => {
+    if (!currentUser) return;
+
+    setMfaPanel((state) => ({ ...state, busy: true, error: '', success: '' }));
+    setEnrollCode('');
+    try {
+      assertSupabaseConfigured();
+      const factorsResult = await supabase.auth.mfa.listFactors();
+      if (factorsResult.error) throw factorsResult.error;
+
+      const unverifiedTotpFactors = factorsResult.data.all.filter(
+        (factor) => factor.factor_type === 'totp' && factor.status !== 'verified'
+      );
+
+      for (const factor of unverifiedTotpFactors) {
+        const removeResult = await supabase.auth.mfa.unenroll({ factorId: factor.id });
+        if (removeResult.error) throw removeResult.error;
+      }
+
+      const enrollResult = await supabase.auth.mfa.enroll({
+        factorType: 'totp',
+        friendlyName: `cipf-${currentUser.email}`
+      });
+      if (enrollResult.error) throw enrollResult.error;
+
+      setMfaPanel((state) => ({
+        ...state,
+        busy: false,
+        enrollFactorId: enrollResult.data.id,
+        enrollQr: enrollResult.data.totp.qr_code,
+        enrollSecret: enrollResult.data.totp.secret,
+        enrollUri: enrollResult.data.totp.uri
+      }));
+    } catch (error: any) {
+      setMfaPanel((state) => ({
+        ...state,
+        busy: false,
+        error: error?.message || 'Não foi possível iniciar o MFA.'
+      }));
+    }
+  };
+
+  const verifyMfaEnrollment = async () => {
+    if (!mfaPanel.enrollFactorId) return;
+
+    setMfaPanel((state) => ({ ...state, busy: true, error: '', success: '' }));
+    try {
+      const verifyResult = await supabase.auth.mfa.challengeAndVerify({
+        factorId: mfaPanel.enrollFactorId,
+        code: enrollCode.trim()
+      });
+      if (verifyResult.error) throw verifyResult.error;
+
+      await refreshCurrentUser();
+      await loadMfaState();
+      setEnrollCode('');
+      setMfaPanel((state) => ({
+        ...state,
+        busy: false,
+        enrollFactorId: '',
+        enrollQr: '',
+        enrollSecret: '',
+        enrollUri: '',
+        success: 'MFA ativado. Sessão promovida para administrador.'
+      }));
+    } catch (error: any) {
+      setMfaPanel((state) => ({
+        ...state,
+        busy: false,
+        error: error?.message || 'Não foi possível confirmar o MFA.'
+      }));
+    }
+  };
+
+  const verifyExistingMfa = async () => {
+    setMfaPanel((state) => ({ ...state, busy: true, error: '', success: '' }));
+    try {
+      const factorsResult = await supabase.auth.mfa.listFactors();
+      if (factorsResult.error) throw factorsResult.error;
+
+      const factor = factorsResult.data.totp[0];
+      if (!factor) throw new Error('Nenhum fator TOTP ativo encontrado.');
+
+      const verifyResult = await supabase.auth.mfa.challengeAndVerify({
+        factorId: factor.id,
+        code: challengeCode.trim()
+      });
+      if (verifyResult.error) throw verifyResult.error;
+
+      await refreshCurrentUser();
+      await loadMfaState();
+      setChallengeCode('');
+      setMfaPanel((state) => ({
+        ...state,
+        busy: false,
+        success: 'MFA validado. Perfil administrador liberado.'
+      }));
+    } catch (error: any) {
+      setMfaPanel((state) => ({
+        ...state,
+        busy: false,
+        error: error?.message || 'Não foi possível validar o MFA.'
+      }));
+    }
+  };
+
   return (
-    <div className="mx-auto max-w-5xl space-y-6 animate-in fade-in duration-500">
-      <div className="institutional-panel rounded-[1.25rem] p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-[#617184]">Operacao do sistema</p>
-            <h2 className="mt-1 text-2xl font-black text-[#17324d]">Configuracoes e Seguranca</h2>
-            <p className="mt-2 text-sm text-[#617184]">Resumo visivel de sessao, permissao e preparacao para autenticacao real.</p>
+    <div className="cipf-page cipf-page-stack mx-auto max-w-5xl">
+      <PageHeader
+        eyebrow="Operação do sistema"
+        title="Configurações e Segurança"
+        description="Resumo visível de sessão, permissão e preparação para autenticação real da operação de Iperó."
+        tone="purple"
+        actions={
+          <div className="cipf-subpanel bg-white px-4 py-3 text-sm">
+            <p className="font-semibold text-[var(--brand-ink)]">Versão {APP_VERSION}</p>
+            <p className="text-xs text-[var(--brand-muted)]">Carteirinha de Fibromialgia de Iperó</p>
           </div>
-          <div className="rounded-xl border border-[#d9e1ea] bg-[#f8fafc] px-4 py-3 text-sm">
-            <p className="font-black text-[#17324d]">Versao {APP_VERSION}</p>
-            <p className="text-xs text-[#617184]">Carteirinha de Fibromialgia</p>
-          </div>
-        </div>
-      </div>
+        }
+      />
 
       <div className="grid gap-4 md:grid-cols-3">
         <div className="institutional-panel rounded-[1rem] p-5">
           <Clock className="mb-3 h-6 w-6 text-[#155c9c]" />
-          <p className="text-sm font-black text-[#17324d]">Sessao</p>
+          <p className="text-sm font-black text-[#17324d]">Sessão</p>
           <p className="mt-2 text-sm text-[#617184]">Inatividade: {idleMinutes} min</p>
           <p className="text-sm text-[#617184]">Duracao maxima: {maxHours} h</p>
         </div>
@@ -84,25 +259,36 @@ export function Configuracoes() {
         </div>
         <div className="institutional-panel rounded-[1rem] p-5">
           <KeyRound className="mb-3 h-6 w-6 text-[#8a6500]" />
-          <p className="text-sm font-black text-[#17324d]">Autenticacao</p>
+          <p className="text-sm font-black text-[#17324d]">Autenticação</p>
           <p className="mt-2 text-sm text-[#617184]">{AUTH_MIGRATION_STATUS}</p>
         </div>
       </div>
 
-      <div className="institutional-panel rounded-[1.25rem] p-6">
+      <div className="cipf-panel p-6">
         <div className="mb-5">
           <h3 className="text-lg font-black text-[#17324d]">Status do sistema</h3>
-          <p className="text-sm text-[#617184]">Resumo rapido para suporte quando algo nao abrir, salvar ou validar.</p>
+          <p className="text-sm text-[#617184]">Resumo rápido para suporte quando algo não abrir, salvar ou validar.</p>
         </div>
+        {(AUTH_MODE !== 'supabase' || !IS_PRODUCTION) && (
+          <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            <p className="font-black">Ambiente de testes / MVP</p>
+            <p className="mt-1">
+              O app ainda usa login local e depende de RLS permissiva para testes. Antes de dados reais, migrar para Supabase Auth/RLS.
+            </p>
+          </div>
+        )}
         <div className="grid gap-3 md:grid-cols-2">
           {[
-            ['Supabase', isSupabaseConfigured ? 'Configurado' : 'Nao configurado', isSupabaseConfigured],
+            ['Supabase', isSupabaseConfigured ? 'Configurado' : 'Não configurado', isSupabaseConfigured],
             ['Hospedagem', 'Firebase Hosting / Vite estatico', true],
             ['Ambiente', IS_PRODUCTION ? 'Producao' : 'Local / desenvolvimento', true],
             ['Modo de login', AUTH_MODE === 'supabase' ? 'Supabase Auth' : 'Credencial local MVP', true],
             ['Origem atual', APP_ORIGIN, true],
             ['Exportacao Excel', 'Desativada: usar CSV/PDF para reduzir risco', true],
-            ['Banco ativo', 'Supabase', true]
+            ['Banco ativo', 'Supabase', true],
+            ['Campos operacionais', 'Aviso, retirada, ultimo acesso e filas preparados', true],
+            ['Checklist LGPD', AUTH_MODE === 'supabase' ? 'Auth/RLS em modo seguro' : 'Pendente para producao real', AUTH_MODE === 'supabase'],
+            ['Relatorios', 'CSV, PDF e relatorio mensal disponiveis', true]
           ].map(([label, value, ok]) => (
             <div key={String(label)} className={`rounded-xl border p-4 ${ok ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
               <p className={`text-xs font-black uppercase tracking-wide ${ok ? 'text-green-700' : 'text-red-700'}`}>{String(label)}</p>
@@ -112,12 +298,165 @@ export function Configuracoes() {
         </div>
       </div>
 
-      <div className="institutional-panel rounded-[1.25rem] p-6">
+      {AUTH_MODE === 'supabase' ? (
+        <div className="cipf-panel p-6">
+          <div className="mb-5 flex items-start gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#f4ecff] text-[var(--fibro-purple)]">
+              <Smartphone className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-black text-[#17324d]">MFA do administrador</h3>
+              <p className="text-sm text-[#617184]">
+                Ative TOTP no aplicativo autenticador para liberar o perfil administrador com `aal2`.
+              </p>
+            </div>
+          </div>
+
+          {mfaPanel.error ? (
+            <div className="mb-4 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {mfaPanel.error}
+            </div>
+          ) : null}
+
+          {mfaPanel.success ? (
+            <div className="mb-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+              {mfaPanel.success}
+            </div>
+          ) : null}
+
+          {mfaPanel.loading ? (
+            <div className="flex items-center gap-2 rounded-xl border border-[#e3e9ef] bg-[#f8fafc] px-4 py-3 text-sm text-[#617184]">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Carregando status do MFA...
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-[#e3e9ef] bg-[#f8fafc] p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-[#7d6c8c]">Nível atual</p>
+                  <p className="mt-1 text-sm font-semibold text-[#17324d]">{mfaPanel.currentLevel || 'sem sessão'}</p>
+                </div>
+                <div className="rounded-xl border border-[#e3e9ef] bg-[#f8fafc] p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-[#7d6c8c]">Próximo nível</p>
+                  <p className="mt-1 text-sm font-semibold text-[#17324d]">{mfaPanel.nextLevel || 'não disponível'}</p>
+                </div>
+                <div className="rounded-xl border border-[#e3e9ef] bg-[#f8fafc] p-4">
+                  <p className="text-xs font-black uppercase tracking-wide text-[#7d6c8c]">Fator TOTP</p>
+                  <p className="mt-1 text-sm font-semibold text-[#17324d]">
+                    {mfaPanel.verifiedTotpCount > 0 ? 'Ativo' : 'Não configurado'}
+                  </p>
+                </div>
+              </div>
+
+              {mfaPanel.verifiedTotpCount === 0 && !mfaPanel.enrollFactorId ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-sm font-semibold text-amber-900">
+                    Sem TOTP ativo. Gere um QR code e cadastre no Google Authenticator, Microsoft Authenticator ou similar.
+                  </p>
+                  <Button type="button" onClick={() => void startMfaEnrollment()} className="mt-4" disabled={mfaPanel.busy}>
+                    {mfaPanel.busy ? 'Gerando QR...' : 'Ativar MFA para liberar perfil administrador'}
+                  </Button>
+                </div>
+              ) : null}
+
+              {mfaPanel.enrollFactorId ? (
+                <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+                  <div className="rounded-xl border border-[#e3e9ef] bg-white p-4">
+                    <p className="text-sm font-black text-[#17324d]">Escaneie o QR code</p>
+                    <div className="mt-4 flex items-center justify-center rounded-xl border border-[#ece7f3] bg-[#faf7fd] p-4">
+                      <img src={mfaPanel.enrollQr} alt="QR code MFA" className="h-56 w-56" />
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-[#e3e9ef] bg-[#f8fafc] p-4">
+                    <p className="text-sm font-black text-[#17324d]">Confirme o código</p>
+                    <p className="mt-2 text-sm text-[#617184]">
+                      Se não conseguir ler o QR, use a chave manual abaixo no autenticador.
+                    </p>
+                    <div className="mt-4 rounded-lg border border-[#e3e9ef] bg-white p-3">
+                      <p className="text-xs font-black uppercase tracking-wide text-[#7d6c8c]">Chave manual</p>
+                      <p className="mt-2 break-all font-mono text-sm text-[#17324d]">{mfaPanel.enrollSecret}</p>
+                    </div>
+                    <div className="mt-4">
+                      <label htmlFor="mfa-enroll-code" className="mb-2 block text-sm font-bold text-[#170b24]">
+                        Código de 6 dígitos
+                      </label>
+                      <Input
+                        id="mfa-enroll-code"
+                        value={enrollCode}
+                        onChange={(event) => setEnrollCode(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+                        placeholder="000000"
+                        inputMode="numeric"
+                        className="max-w-xs tracking-[0.35em]"
+                      />
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button type="button" onClick={() => void verifyMfaEnrollment()} disabled={mfaPanel.busy || enrollCode.length < 6}>
+                        {mfaPanel.busy ? 'Confirmando...' : 'Confirmar MFA'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setMfaPanel((state) => ({ ...state, enrollFactorId: '', enrollQr: '', enrollSecret: '', enrollUri: '' }))}
+                        disabled={mfaPanel.busy}
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {mfaPanel.verifiedTotpCount > 0 && currentUser?.role === 'viewer' ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-sm font-semibold text-amber-900">
+                    TOTP já existe, mas esta sessão ainda não validou o segundo fator.
+                  </p>
+                  <div className="mt-4">
+                    <label htmlFor="mfa-login-code" className="mb-2 block text-sm font-bold text-[#170b24]">
+                      Código atual do autenticador
+                    </label>
+                    <Input
+                      id="mfa-login-code"
+                      value={challengeCode}
+                      onChange={(event) => setChallengeCode(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+                      placeholder="000000"
+                      inputMode="numeric"
+                      className="max-w-xs tracking-[0.35em]"
+                    />
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button type="button" onClick={() => void verifyExistingMfa()} disabled={mfaPanel.busy || challengeCode.length < 6}>
+                      {mfaPanel.busy ? 'Validando...' : 'Liberar perfil administrador'}
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => void logout()} disabled={mfaPanel.busy}>
+                      Sair
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {mfaPanel.verifiedTotpCount > 0 && currentUser?.role === 'admin' ? (
+                <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+                  MFA ativo e sessão já validada com `aal2`.
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      <div className="cipf-panel p-6">
         <div className="mb-5">
           <h3 className="text-lg font-black text-[#17324d]">Perfil atual</h3>
           <p className="text-sm text-[#617184]">
-            {currentUser?.name || 'Usuario nao identificado'} • {getRoleLabel(currentUser?.role)}
+            {currentUser?.name || 'Usuário não identificado'} • {getRoleLabel(currentUser?.role)}
           </p>
+          {currentUser?.accessNotice === 'admin_mfa_required' ? (
+            <p className="mt-2 text-sm text-amber-800">
+              Conta cadastrada como {getRoleLabel(currentUser.intendedRole)}, mas sessão sem MFA. SQL reduz acesso para Consulta.
+            </p>
+          ) : null}
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {PERMISSION_LABELS.map(([permission, label]) => {
@@ -134,8 +473,28 @@ export function Configuracoes() {
         </div>
       </div>
 
+      {currentUser?.accessNotice === 'admin_mfa_required' ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
+          <p className="font-black">Ative MFA para liberar perfil administrador</p>
+          <p className="mt-2">
+            Seu usuário está cadastrado como {getRoleLabel(currentUser.intendedRole)}, mas a sessão atual não trouxe MFA nível `aal2`.
+            Enquanto isso, banco reduz permissões para Consulta.
+          </p>
+          <ol className="mt-3 list-decimal space-y-1 pl-5">
+            <li>Ative MFA no usuário admin no Supabase Auth.</li>
+            <li>Saia da sessão atual.</li>
+            <li>Entre novamente completando o segundo fator.</li>
+          </ol>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button type="button" onClick={() => void logout()}>
+              Sair para relogar com MFA
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {!IS_PRODUCTION ? (
-        <div className="institutional-panel rounded-[1.25rem] p-6">
+        <div className="cipf-panel p-6">
           <div className="mb-5 flex items-start gap-3">
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#eaf3fb] text-[#155c9c]">
               <UserCog className="h-5 w-5" />
@@ -143,7 +502,7 @@ export function Configuracoes() {
             <div>
               <h3 className="text-lg font-black text-[#17324d]">Alternar usuario de teste</h3>
               <p className="text-sm text-[#617184]">
-                Troca o perfil apenas nesta sessao do navegador. Use para testar permissao e telas sem digitar login novamente.
+                Troca o perfil apenas nesta sessão do navegador. Use para testar permissão e telas sem digitar login novamente.
               </p>
             </div>
           </div>
@@ -158,7 +517,7 @@ export function Configuracoes() {
                     type="button"
                     variant={isCurrentRole ? 'outline' : 'default'}
                     onClick={() => switchUser(user.role, user.name)}
-                    className={`mt-4 h-10 w-full rounded-xl ${isCurrentRole ? '' : 'bg-[#17324d] text-white hover:bg-[#10263b]'}`}
+                    className="mt-4 w-full"
                     disabled={isCurrentRole}
                   >
                     {isCurrentRole ? 'Perfil atual' : `Usar ${getRoleLabel(user.role)}`}
@@ -175,7 +534,7 @@ export function Configuracoes() {
       )}
 
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
-        <p className="font-black">Nota de seguranca operacional</p>
+        <p className="font-black">Nota de segurança operacional</p>
         <p className="mt-1">
           O login local continua adequado para testes controlados. Para uso real, a proxima etapa recomendada e migrar para Supabase Auth ou backend com RLS aplicada.
         </p>

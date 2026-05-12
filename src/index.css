@@ -2,16 +2,25 @@
 
 :root {
   --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --brand-primary: #155c9c;
-  --brand-secondary: #1f8a58;
-  --brand-accent: #f2c94c;
-  --brand-ink: #17324d;
-  --brand-muted: #617184;
-  --surface-bg: #eef2f5;
+  --brand-primary: #5b2785;
+  --brand-primary-strong: #4a1f70;
+  --brand-secondary: #168821;
+  --brand-accent: #fdb81e;
+  --fibro-purple: #5b2785;
+  --fibro-purple-strong: #4a1f70;
+  --fibro-purple-muted: #8b5cf6;
+  --fibro-purple-soft: #f4ecff;
+  --fibro-purple-border: #dfc7ff;
+  --brand-ink: #071d41;
+  --brand-muted: #5b677a;
+  --brand-muted-soft: #7a8797;
+  --surface-bg: #fbfafc;
+  --surface-soft: #faf8fb;
   --surface-card: #ffffff;
-  --border-soft: #d9e1ea;
-  --font-ui: "Segoe UI", "Trebuchet MS", "Verdana", sans-serif;
-  --font-display: "Bahnschrift", "Segoe UI Semibold", "Trebuchet MS", sans-serif;
+  --border-soft: #d6dce5;
+  --border-subtle: #e3e9ef;
+  --font-ui: "Aptos", "Segoe UI", "Verdana", sans-serif;
+  --font-display: "Bahnschrift", "Aptos Display", "Segoe UI Semibold", sans-serif;
 }
 
 @keyframes page-fade-in {
@@ -76,18 +85,134 @@
   }
 }
 
+@keyframes notification-bell-ring {
+  0%,
+  45%,
+  100% {
+    transform: rotate(0deg);
+  }
+  52% {
+    transform: rotate(12deg);
+  }
+  59% {
+    transform: rotate(-10deg);
+  }
+  66% {
+    transform: rotate(8deg);
+  }
+  73% {
+    transform: rotate(-5deg);
+  }
+  80% {
+    transform: rotate(3deg);
+  }
+}
+
+@keyframes dashboard-icon-float {
+  0%,
+  100% {
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.08) rotate(-3deg);
+  }
+}
+
+@keyframes dashboard-soft-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(123, 44, 191, 0);
+  }
+  50% {
+    box-shadow: 0 10px 24px rgba(123, 44, 191, 0.12);
+  }
+}
+
+@keyframes upload-icon-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes upload-border-breathe {
+  0%,
+  100% {
+    border-color: #d8e2ec;
+    box-shadow: 0 0 0 rgba(123, 44, 191, 0);
+  }
+  50% {
+    border-color: rgba(139, 92, 246, 0.42);
+    box-shadow: 0 16px 36px rgba(123, 44, 191, 0.08);
+  }
+}
+
+@keyframes landing-float {
+  0%,
+  100% {
+    transform: scale(1.1) translate(0, 0);
+  }
+  50% {
+    transform: scale(1.15) translate(-1%, -1%);
+  }
+}
+
+@keyframes landing-blob {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -40px) scale(1.1);
+  }
+  66% {
+    transform: translate(-20px, 30px) scale(0.95);
+  }
+}
+
+@keyframes public-shell-enter {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.988);
+    filter: blur(10px) saturate(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0) saturate(1);
+  }
+}
+
+@keyframes public-shell-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0) saturate(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(1.012);
+    filter: blur(8px) saturate(0.96);
+  }
+}
+
 html,
 body {
   min-height: 100%;
 }
 
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 7rem;
+}
+
 body {
   font-family: var(--font-ui);
-  color: #18222d;
-  background:
-    radial-gradient(circle at top left, rgba(31, 138, 88, 0.12), transparent 28rem),
-    radial-gradient(circle at top right, rgba(21, 92, 156, 0.12), transparent 30rem),
-    linear-gradient(180deg, #f7fafc 0%, var(--surface-bg) 42%, #e9eef4 100%);
+  color: #251832;
+  background: var(--surface-bg);
   animation: page-fade-in 280ms var(--motion-ease);
 }
 
@@ -95,6 +220,20 @@ h1,
 h2,
 h3 {
   font-family: var(--font-display);
+}
+
+.lovable-home {
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+.lovable-home h1,
+.lovable-home h2,
+.lovable-home h3,
+.lovable-home .lovable-display,
+.lovable-display {
+  font-family: "Source Serif 4", Georgia, serif !important;
+  font-optical-sizing: auto;
+  letter-spacing: -0.015em;
 }
 
 /* Tighten older rounded utility usage so legacy screens match the new institutional shell. */
@@ -135,6 +274,20 @@ h3 {
   animation-fill-mode: both;
 }
 
+.public-shell-transition {
+  will-change: opacity, transform, filter;
+  transform-origin: center top;
+}
+
+.public-shell-transition--enter {
+  animation: public-shell-enter 520ms var(--motion-ease) both;
+}
+
+.public-shell-transition--exit {
+  animation: public-shell-exit 180ms ease-out both;
+  pointer-events: none;
+}
+
 .fade-in {
   animation-name: fade-in;
 }
@@ -170,6 +323,32 @@ select {
     transform 180ms var(--motion-ease);
 }
 
+select,
+textarea {
+  min-height: 2.75rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 0.75rem;
+  background-color: white;
+  color: var(--brand-ink);
+  font: inherit;
+}
+
+select {
+  padding: 0 0.85rem;
+}
+
+textarea {
+  padding: 0.75rem 0.85rem;
+  line-height: 1.55;
+}
+
+select:focus,
+textarea:focus {
+  border-color: #9fc5ea;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 94, 184, 0.14);
+}
+
 button:hover {
   transform: none;
 }
@@ -180,25 +359,111 @@ button:active {
 
 .institutional-panel {
   border: 1px solid var(--border-soft);
+  border-radius: 1.25rem;
   background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 14px 42px rgba(23, 50, 77, 0.08);
+  box-shadow: 0 12px 34px rgba(7, 29, 65, 0.055);
 }
 
 .institutional-hero {
   background:
-    radial-gradient(circle at 18% 20%, rgba(242, 201, 76, 0.24), transparent 18rem),
-    radial-gradient(circle at 85% 0%, rgba(31, 138, 88, 0.28), transparent 20rem),
-    linear-gradient(135deg, var(--brand-ink) 0%, #155c9c 58%, #1f8a58 100%);
+    linear-gradient(180deg, var(--brand-ink) 0%, var(--brand-ink) 35%, var(--brand-primary) 35%, var(--brand-primary) 100%);
 }
 
 .official-button {
-  background: var(--brand-ink);
+  background: var(--brand-primary);
   color: white;
-  box-shadow: 0 8px 18px rgba(23, 50, 77, 0.14);
+  box-shadow: 0 6px 14px rgba(0, 94, 184, 0.12);
 }
 
 .official-button:hover {
-  background: #10263b;
+  background: var(--brand-primary-strong);
+}
+
+.cipf-page {
+  animation: fade-in 420ms var(--motion-ease) both;
+}
+
+.cipf-page-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+.cipf-page-header {
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+  padding-bottom: 1.75rem;
+}
+
+.cipf-page-header-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
+.cipf-kicker {
+  color: #6f617b;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.cipf-title {
+  color: #170b24;
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-wrap: balance;
+}
+
+.app-brand-title {
+  color: var(--brand-ink);
+  font-family: "Bahnschrift Condensed", "Aptos Display", "Arial Narrow", "Segoe UI Black", sans-serif;
+  font-stretch: condensed;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 0.95;
+  text-transform: uppercase;
+}
+
+.cipf-description {
+  color: #6f617b;
+  line-height: 1.65;
+}
+
+.cipf-panel {
+  border: 1px solid #e4ddea;
+  border-radius: 0.5rem;
+  background: var(--surface-card);
+  box-shadow: 0 1px 2px rgba(72, 45, 91, 0.05);
+}
+
+.cipf-subpanel {
+  border: 1px solid #ece7f3;
+  border-radius: 0.45rem;
+  background: var(--surface-soft);
+}
+
+.cipf-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.cipf-empty {
+  border: 1px dashed var(--border-soft);
+  border-radius: 0.45rem;
+  background: var(--surface-soft);
+  color: var(--brand-muted);
+  padding: 1.5rem;
+}
+
+.cipf-focus-ring {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(123, 44, 191, 0.16);
 }
 
 .status-chip {
@@ -211,6 +476,107 @@ button:active {
   text-transform: uppercase;
 }
 
+.notification-bell-attention {
+  transform-origin: 50% 0;
+  animation: notification-bell-ring 4.8s var(--motion-ease) infinite;
+}
+
+.dashboard-stat-card {
+  transition:
+    transform 220ms var(--motion-ease),
+    border-color 220ms var(--motion-ease),
+    box-shadow 220ms var(--motion-ease),
+    background-color 220ms var(--motion-ease);
+}
+
+.dashboard-stat-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(123, 44, 191, 0.2);
+  background: #ffffff;
+  box-shadow: 0 16px 34px rgba(7, 29, 65, 0.08) !important;
+}
+
+.dashboard-stat-icon {
+  transform-origin: center;
+  transition: transform 220ms var(--motion-ease);
+}
+
+.dashboard-stat-card:hover .dashboard-stat-icon {
+  animation: dashboard-icon-float 850ms var(--motion-ease);
+}
+
+.dashboard-action-button .dashboard-action-icon {
+  transform-origin: center;
+  transition: transform 180ms var(--motion-ease), color 180ms var(--motion-ease);
+}
+
+.dashboard-action-button:hover .dashboard-action-icon {
+  transform: translateY(-1px) scale(1.12) rotate(-4deg);
+}
+
+.dashboard-soft-glow {
+  animation: dashboard-soft-glow 3.2s var(--motion-ease) infinite;
+}
+
+.cipf-print-exact {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.cipf-progress {
+  display: block;
+  overflow: hidden;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.cipf-progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: transparent;
+}
+
+.cipf-progress::-webkit-progress-value {
+  border-radius: 999px;
+}
+
+.cipf-progress::-moz-progress-bar {
+  border-radius: 999px;
+}
+
+.cipf-progress-blue::-webkit-progress-value,
+.cipf-progress-blue::-moz-progress-bar {
+  background: #005eb8;
+}
+
+.cipf-progress-green::-webkit-progress-value,
+.cipf-progress-green::-moz-progress-bar {
+  background: #168821;
+}
+
+.cipf-progress-red::-webkit-progress-value,
+.cipf-progress-red::-moz-progress-bar {
+  background: #ef4444;
+}
+
+.cipf-progress-amber::-webkit-progress-value,
+.cipf-progress-amber::-moz-progress-bar {
+  background: #f59e0b;
+}
+
+.validation-upload-zone {
+  animation: upload-border-breathe 4.5s var(--motion-ease) infinite;
+}
+
+.validation-upload-icon {
+  animation: upload-icon-bob 2.8s var(--motion-ease) infinite;
+}
+
+.validation-upload-zone:hover .validation-upload-icon {
+  animation-duration: 1.2s;
+}
+
 .cadastro-wizard.step-0 .wizard-section:not(.wizard-step-0),
 .cadastro-wizard.step-1 .wizard-section:not(.wizard-step-1),
 .cadastro-wizard.step-2 .wizard-section:not(.wizard-step-2),
@@ -220,6 +586,14 @@ button:active {
 }
 
 @media (max-width: 640px) {
+  .cipf-page-stack {
+    gap: 2rem;
+  }
+
+  .cipf-page-header-card {
+    padding: 1.25rem;
+  }
+
   button {
     min-height: 44px;
   }
