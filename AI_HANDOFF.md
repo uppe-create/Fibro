@@ -1,130 +1,135 @@
 # AI Handoff - Carteirinha de Fibromialgia
 
-Este arquivo existe para acelerar outra IA ou outro dev que precise mexer no projeto.
-Nao inclua aqui senhas, chaves secretas, service role, `sb_secret` ou dados reais de pacientes.
+Arquivo para outra IA ou outro dev entrar rapido.
+Nunca salvar aqui senhas, secrets, service role, `sb_secret` ou dados reais.
 
 ## Ideia do Produto
 
-O app emite, consulta, imprime e valida publicamente a CIPF, Carteira de Identificacao da Pessoa com Fibromialgia, para uso municipal.
+App para cadastro, analise, emissao, impressao e validacao publica da CIPF municipal.
 
-Fluxo principal:
+Fluxo:
 
-1. Usuario interno faz login.
-2. Atendente/admin cadastra a pessoa e anexa documentos.
-3. Novo cadastro entra como `under_review`, sem validacao publica positiva.
-4. Admin ou atendente aprova o cadastro, mudando para `approved`.
-5. Somente admin emite/imprime/baixa PNG; nesse momento o status vira `issued`.
-6. Qualquer pessoa com QR Code acessa a validacao publica e ve apenas dados minimos.
+1. Usuario interno entra.
+2. Atendente/admin cadastra pessoa e anexa documentos.
+3. Cadastro novo entra `under_review`.
+4. Admin aprova para `approved`.
+5. Admin emite para `issued`.
+6. Publico valida por QR Code e ve so dados minimos.
 
 ## Estado Tecnico Atual
 
 - React + Vite.
-- Supabase e o banco ativo.
-- Firebase e apenas Hosting.
-- Login local continua como padrao do MVP.
-- Supabase Auth esta preparado por `VITE_AUTH_MODE="supabase"`, mas nao deve ser ligado sem criar usuarios/perfis antes.
-- RLS restritiva ainda nao deve ser aplicada no banco vivo sem testar Auth/perfis.
-- Telas e bibliotecas pesadas sao carregadas sob demanda com `React.lazy` e `import()`.
-- Rascunho sensivel fica desativado por padrao; `VITE_ENABLE_SENSITIVE_DRAFTS="true"` so deve ser usado em teste controlado.
-- DevTools fica desativado por padrao; `VITE_ALLOW_DEV_TOOLS="true"` so deve apontar para banco descartavel.
+- Supabase como banco.
+- Firebase so para Hosting.
+- Producao exige `VITE_AUTH_MODE="supabase"`.
+- Login local segue para MVP/teste.
+- Supabase Auth ja ativo.
+- Admin sem MFA cai para `viewer`.
+- MFA TOTP no app ja existe em `Configuracoes` e `MfaChallenge`.
+- RLS restritiva aplicada via SQL.
+- Validacao publica usa so `validate_cipf_public(text, text)`.
+- Auditoria usa `log_audit_event`.
+- Documentos novos usam Storage privado `cipf-documents`.
+- Em `auth_mode=supabase`, aprovar, emitir, cancelar, renovar, arquivar e autorizar exportacao passam por RPC administrativa.
 
 ## Arquivos Principais
 
-- `src/App.tsx`: shell do app, abas, lazy loading, protecao por permissao e timeout de sessao.
-- `src/store/useAppStore.ts`: estado global, login local, preparo para Supabase Auth, sessao, busca de registros e operacoes globais.
-- `src/lib/permissions.ts`: matriz unica de papeis e permissoes. Comece aqui para qualquer regra de acesso.
-- `src/lib/registration-status.ts`: helpers centrais de status, labels, validade publica e workflow.
-- `src/lib/dashboard-utils.ts`: filtros, KPIs, checklist documental, `isReadyToPrint` e helpers puros do dashboard.
-- `src/lib/cadastro-utils.ts`: schema do cadastro, normalizacoes, upload, recorte de foto e checksum.
-- `src/lib/cipf-files.ts`: recupera documentos salvos em chunks Base64 no Supabase.
-- `src/modules/Cadastro.tsx`: formulario, rascunho local, upload, conferencia antierro e gravacao do cadastro.
-- `src/modules/Dashboard.tsx`: KPIs, filtros, busca fixa, atalhos, fila operacional, ultimos acessados, ficha, historico, edicao e exportacoes.
-- `src/modules/Carteirinha.tsx`: busca de cadastro aprovado/emitido e download da carteirinha em PNG.
-- `src/components/CarteirinhaPreview.tsx`: layout imprimivel da carteirinha frente/verso.
-- `src/modules/Valida.tsx`: pagina publica do QR Code; deve retornar apenas dados minimos.
-- `src/modules/Configuracoes.tsx`: status do sistema, permissoes, sessao e alternador de usuario apenas fora de producao.
-- `SECURITY.md`: resumo de seguranca e cuidados antes de producao real.
+- `src/store/useAppStore.ts`: auth, sessao, registros, backup, limpeza.
+- `src/lib/permissions.ts`: matriz unica de permissoes.
+- `src/lib/auth-mode.ts`: trava auth insegura em producao.
+- `src/lib/admin-rpc.ts`: ponte frontend para RPC administrativa.
+- `src/lib/audit.ts`: auditoria RPC.
+- `src/lib/file-security.ts`: validacao central de upload.
+- `src/lib/storage-files.ts`: upload privado e signed URL.
+- `src/modules/Cadastro.tsx`: UI do cadastro.
+- `src/modules/cadastro/hooks/useCadastroSubmit.ts`: submit, upload, rollback, auditoria.
+- `src/components/Notifications.tsx`: casca visual do sino.
+- `src/components/notifications/notificationRules.ts`: regras puras de notificacao.
+- `src/components/notifications/useNotifications.ts`: agregador de notificacoes.
+- `src/components/notifications/NotificationCard.tsx`: render de secao.
+- `src/modules/dashboard/hooks/useRegistrationWorkflow.ts`: workflow admin/local com RPC em modo Supabase.
+- `src/modules/dashboard/hooks/useDashboardExports.ts`: exportacao com autorizacao RPC em modo Supabase.
+- `src/modules/Configuracoes.tsx`: setup e verify de MFA.
+- `src/modules/MfaChallenge.tsx`: segundo fator no login.
+- `src/modules/Valida.tsx`: validacao publica.
 
 ## SQL e Banco
 
-- `supabase-schema.sql`: schema MVP atual.
-- `supabase-workflow-status-migration.sql`: migracao segura de status antigos.
-- `supabase-auth-rls-prep.sql`: prepara `app_profiles` para Supabase Auth.
-- `supabase-hardening-production.sql`: modelo de RLS mais restritivo para producao real.
+Canonico:
 
-Tabelas principais:
+- `supabase/migrations/`
+- `supabase/tests/`
 
-- `registrations`: cadastro completo e dados sensiveis.
-- `registration_index`: indice por CPF para evitar duplicidade ativa.
-- `public_validations`: dados minimos para consulta publica.
-- `cipf_files` e `cipf_file_chunks`: arquivos anexos em Base64 chunked.
-- `audit_logs`: trilha de auditoria.
+Legado/manual:
+
+- SQLs `.sql` na raiz
+
+Migracoes principais:
+
+- `20260512090000_initial_schema.sql`
+- `20260512091000_workflow_status.sql`
+- `20260512092000_operational_fields.sql`
+- `20260512093000_auth_rls_prep.sql`
+- `20260512094000_storage_private_documents.sql`
+- `20260512095000_hardening_production.sql`
+
+Teste SQL:
+
+- `supabase/tests/rls_profile_smoke.sql`
+
+RPCs criticas:
+
+- `validate_cipf_public`
+- `log_audit_event`
+- `admin_transition_registration`
+- `admin_request_export`
 
 ## Regras de Negocio
 
-- CPF e unico para carteirinha ativa via `registration_index`.
-- CID padrao esperado e `M79.7`; CID diferente exige justificativa medica.
-- Comprovante de residencia nao pode ter mais de 90 dias.
-- Laudo medico nao pode ter mais de 6 meses.
-- Menor de 18 anos exige responsavel legal.
-- CNS/Cartao SUS e opcional, mas se informado deve ter 15 digitos.
-- Validade padrao da carteirinha: 2 anos a partir da emissao.
-- Status atuais: `under_review`, `approved`, `issued`, `expired`, `cancelled`.
-- Legados aceitos temporariamente: `active` vira `issued`; `pending` vira `under_review`.
-- Validacao publica positiva somente para `issued` ou legado `active` com validade nao vencida.
-- Cancelamento exige motivo quando feito pelo fluxo operacional.
+- CPF unico via `registration_index`.
+- CID esperado `M79.7`; fora disso exige justificativa.
+- Comprovante ate 90 dias.
+- Laudo ate 6 meses.
+- Menor de 18 exige responsavel legal.
+- CNS opcional, 15 digitos se informado.
+- Validade padrao: 2 anos da emissao.
+- Status: `under_review`, `approved`, `issued`, `expired`, `cancelled`.
+- Cancelamento exige motivo.
 - Renovacao volta para `approved`.
 - Segunda via exige motivo e auditoria.
-- Arquivamento operacional usa status `cancelled`, nao exclusao fisica imediata.
-- Exportacao Excel nativa foi removida junto com `xlsx`; manter CSV/PDF.
-
-## Produtividade no Dashboard
-
-- `Ctrl + K` foca a busca.
-- `Enter` na busca rola para os resultados.
-- Busca e filtros ficam fixos no topo durante a rolagem.
-- Ultimos 5 cadastros acessados/editados ficam em card local por navegador.
-- Selo "Pronto para imprimir" aparece quando o cadastro esta `approved` e sem pendencias documentais.
-- Checklist documental usa `getDocumentIssues`.
-- Fila operacional destaca cadastros `under_review` e `approved`.
-- Assinatura visual usa token forte com `crypto.getRandomValues()`.
-- Erros exibidos ao usuario devem passar por `getSafeErrorMessage`.
-
-## Papeis e Permissoes
-
-- `admin`: aprova, emite/imprime, cancela, renova, segunda via, exporta, arquiva/exclui, limpa banco e usa DevTools.
-- `attendant`: cadastra, edita, consulta dashboard, ve laudo/historico, aprova e renova, mas nao imprime.
-- `viewer`: perfil de consulta basica; nao acessa dashboard, cadastro nem impressao.
-
-Sempre use `hasPermission(...)` de `src/lib/permissions.ts` para novas acoes sensiveis.
+- Validacao publica positiva so para `issued`.
 
 ## Seguranca
 
-O app ainda e um MVP frontend com chave publishable/anon no navegador. Isso nao e segredo, mas significa que a seguranca real precisa vir de RLS, Supabase Auth e/ou backend confiavel.
+Validado:
 
-Antes de uso real:
+1. `anon` nao le `registrations`.
+2. `anon` nao le `public_validations`.
+3. `anon` nao grava `audit_logs`.
+4. `validate_cipf_public` responde ao publico.
+5. Admin sem MFA vira `viewer`.
+6. Storage privado nao expoe objeto para `anon`.
+7. Workflow sensivel usa RPC em `auth_mode=supabase`.
 
-1. Criar usuarios reais no Supabase Auth.
-2. Aplicar/adaptar `supabase-auth-rls-prep.sql`.
-3. Preencher `app_profiles`.
-4. Testar `VITE_AUTH_MODE="supabase"` localmente.
-5. Aplicar RLS de producao apenas depois dos testes.
-6. Testar cada perfil com dados ficticios.
+Ainda depende de configuracao no Supabase:
 
-Riscos conhecidos enquanto `VITE_AUTH_MODE="local"`:
+1. Aplicar migracoes versionadas no projeto certo.
+2. Habilitar TOTP em `Authentication -> Multi-Factor Authentication`.
+3. Criar usuarios/perfis em `auth.users` + `app_profiles`.
+4. Testar conta atendente real.
 
-- Credenciais/hash em frontend nao sao protecao real.
-- Sessao local pode ser manipulada via DevTools.
-- Lockout local pode ser apagado pelo usuario.
-- RLS aberta para `anon` nao protege dados reais.
+## Padrao de Edicao
 
-## Padrao de Edicao Recomendado
+- Permissao: `src/lib/permissions.ts`.
+- Status/workflow: `src/lib/registration-status.ts`.
+- Acao sensivel: primeiro backend, depois UI.
+- Publico: nunca ler `registrations` direto.
+- Documento novo: usar Storage privado, nao Base64 novo.
+- Auditoria: usar `logAuditEvent`.
+- Em `auth_mode=supabase`: nao usar `update()` direto para aprovar/emitir/cancelar/renovar/arquivar/exportar.
 
-- Para permissao: comece por `src/lib/permissions.ts`.
-- Para status/workflow: comece por `src/lib/registration-status.ts`.
-- Para campo novo no cadastro: atualizar tipo `CIPFRegistration`, schema, insert/update Supabase, ficha, exportacao, SQL e carteirinha se for exibido.
-- Para dado publico: nunca leia de `registrations` na tela publica; use `public_validations` ou RPC segura.
-- Para arquivo/documento: use `loadCipfFileDataUri` e nao duplique a logica de chunks.
-- Para acao importante: registrar em `audit_logs` via `logAuditEvent`.
-- Para dependencia nova: verificar necessidade real e rodar `npm.cmd audit --omit=dev`.
-- Para mudanca visual/fluxo: rodar `npm.cmd run lint`, `npm.cmd run build`, testar local, publicar Firebase Hosting e commitar no GitHub.
+## Proximos Cortes
+
+- Migrar `notifyPatient`, `registerPickup` e `clearDatabase` para RPC/Edge.
+- Remover SQL legado da raiz quando deploy usar so `supabase/migrations`.
+- Adicionar E2E Supabase Auth real com ambiente de teste dedicado.
