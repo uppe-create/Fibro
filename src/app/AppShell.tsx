@@ -1,0 +1,305 @@
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { LogOut, Search, ShieldCheck } from 'lucide-react';
+import { Tabs } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { Notifications } from '@/components/Notifications';
+import {
+  getSessionSecurityConfig,
+  SESSION_ACTIVITY_STORAGE_KEY,
+  SESSION_LOGIN_AT_STORAGE_KEY,
+  useAppStore
+} from '@/store/useAppStore';
+import { canAccessTab, getDefaultTabForRole, getRoleLabel } from '@/lib/permissions';
+import { InternalNavigation } from '@/app/InternalNavigation';
+import { NavigationTabs } from '@/app/NavigationTabs';
+import { PublicRoutes } from '@/app/PublicRoutes';
+import { APP_NAME, APP_VERSION, AUTH_MODE, IS_PRODUCTION, preloadAppModules, SESSION_CHECK_INTERVAL_MS } from '@/app/appModules';
+import { getProductionAuthError } from '@/lib/auth-mode';
+import { MfaChallenge } from '@/modules/MfaChallenge';
+
+const PEOPLE_SEARCH_STORAGE_KEY = 'cipf_people_search';
+
+export function AppShell() {
+  const { currentUser, logout, activeTab, setActiveTab, logAudit, initializeAuth, mfaChallenge } = useAppStore();
+  const { idleTimeoutMs, maxSessionMs } = getSessionSecurityConfig();
+  const [globalSearch, setGlobalSearch] = useState('');
+  const previousUserIdRef = useRef<string | null>(null);
+  const productionAuthError = getProductionAuthError((import.meta as any).env || {}, IS_PRODUCTION);
+
+  useEffect(() => {
+    document.title = APP_NAME;
+  }, []);
+
+  useEffect(() => {
+    void initializeAuth();
+  }, [initializeAuth]);
+
+  useEffect(() => {
+    const preloadModules = () => {
+      void preloadAppModules();
+    };
+
+    const idleCallback = (window as any).requestIdleCallback as undefined | ((callback: () => void) => number);
+    if (idleCallback) {
+      const handle = idleCallback(preloadModules);
+      return () => (window as any).cancelIdleCallback?.(handle);
+    }
+
+    const timeout = window.setTimeout(preloadModules, 800);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  useEffect(() => {
+    if (IS_PRODUCTION && activeTab === 'dev') {
+      setActiveTab('configuracoes');
+      return;
+    }
+    if (!currentUser || canAccessTab(currentUser, activeTab)) return;
+    setActiveTab(getDefaultTabForRole(currentUser.role));
+  }, [activeTab, currentUser, setActiveTab]);
+
+  useEffect(() => {
+    if (currentUser) return;
+    if (!['privacidade', 'termos', 'contato', 'acessibilidade', 'suporte'].includes(activeTab)) return;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [activeTab, currentUser]);
+
+  useEffect(() => {
+    const previousUserId = previousUserIdRef.current;
+    if (currentUser && previousUserId !== currentUser.id && ['inicio', 'validar', 'configuracoes', 'suporte', 'acessibilidade'].includes(activeTab)) {
+      setActiveTab(getDefaultTabForRole(currentUser.role));
+    }
+    previousUserIdRef.current = currentUser?.id || null;
+  }, [activeTab, currentUser, setActiveTab]);
+
+  const resetTimer = useCallback(() => {
+    if (!currentUser) return;
+    localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let expired = false;
+    resetTimer();
+
+    const expireSession = async (reason: string) => {
+      if (expired) return;
+      expired = true;
+      await logAudit('Sessão Expirada', reason);
+      await logout();
+      alert('Sessão encerrada automaticamente por segurança. Faça login novamente.');
+    };
+
+    const checkSession = async () => {
+      const now = Date.now();
+      const lastActivity = Number(localStorage.getItem(SESSION_ACTIVITY_STORAGE_KEY) || now);
+      const sessionStartedAt = Number(localStorage.getItem(SESSION_LOGIN_AT_STORAGE_KEY) || now);
+
+      if (now - lastActivity > idleTimeoutMs) {
+        await expireSession('Inatividade acima do limite configurado');
+        return;
+      }
+
+      if (now - sessionStartedAt > maxSessionMs) {
+        await expireSession('Tempo máximo de sessão excedido');
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      void checkSession();
+    }, SESSION_CHECK_INTERVAL_MS);
+
+    const activityEvents: Array<keyof WindowEventMap> = ['mousemove', 'click', 'keypress', 'scroll', 'touchstart'];
+    activityEvents.forEach((eventName) => window.addEventListener(eventName, resetTimer, { passive: true }));
+
+    return () => {
+      clearInterval(interval);
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, resetTimer));
+    };
+  }, [currentUser, idleTimeoutMs, maxSessionMs, logout, logAudit, resetTimer]);
+
+  const submitGlobalSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const query = globalSearch.trim();
+    if (!query) return;
+    sessionStorage.setItem(PEOPLE_SEARCH_STORAGE_KEY, query);
+    setActiveTab('pessoas');
+  };
+
+  if (productionAuthError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#2f1450] px-4 text-white">
+        <div className="max-w-xl rounded-lg border border-white/20 bg-white/10 p-6 shadow-2xl">
+          <ShieldCheck className="mb-4 h-9 w-9 text-amber-200" />
+          <h1 className="text-2xl font-black">Aplicação bloqueada por segurança</h1>
+          <p className="mt-3 text-sm text-white/80">{productionAuthError}</p>
+          <p className="mt-4 text-sm text-white/70">Configure Supabase Auth antes de publicar com dados reais.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const initials = currentUser?.name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('');
+  const isStandalonePublicPage = (activeTab === 'inicio' || activeTab === 'validar') && !currentUser;
+  const hideGlobalPublicFooter = !currentUser && ['privacidade', 'termos', 'contato'].includes(activeTab);
+  const isPublicShell = !currentUser;
+  const isAdminBlockedByMfa = currentUser?.accessNotice === 'admin_mfa_required' && currentUser.role === 'viewer';
+
+  useEffect(() => {
+    if (!isAdminBlockedByMfa) return;
+    if (activeTab === 'configuracoes') return;
+    setActiveTab('configuracoes');
+  }, [activeTab, isAdminBlockedByMfa, setActiveTab]);
+
+  return (
+    <div className="min-h-screen bg-[#fbfafc] text-[#251832] selection:bg-[#eadcff]">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-screen flex-col">
+        {isPublicShell && !isStandalonePublicPage && (
+          <header className="lovable-home print:hidden border-b border-[hsl(270_15%_90%)] bg-white/95 shadow-[0_1px_2px_hsl(270_25%_14%/0.04)] backdrop-blur">
+            <div className="mx-auto flex min-h-20 max-w-[1240px] flex-col gap-4 px-4 py-4 md:px-8 xl:grid xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-center">
+              <button type="button" onClick={() => setActiveTab('inicio')} className="order-1 flex min-w-0 items-center xl:justify-self-start">
+                <div className="min-w-0 text-left leading-tight">
+                  <div className="lovable-display text-base font-semibold text-[hsl(270_25%_14%)]">CIPF</div>
+                  <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-[hsl(270_8%_42%)]">Iperó · Carteirinha Municipal</div>
+                </div>
+              </button>
+
+              <div className="order-3 xl:order-2">
+                <NavigationTabs
+                  activeTab={activeTab}
+                  currentUser={currentUser}
+                  setActiveTab={setActiveTab}
+                />
+              </div>
+
+              <div className="order-2 flex flex-col gap-3 xl:order-3 xl:min-w-0 xl:justify-self-end xl:flex-row xl:items-center xl:justify-end">
+                <Button
+                  type="button"
+                  onClick={() => setActiveTab('configuracoes')}
+                  className="h-10 w-full rounded-md bg-[hsl(271_52%_32%)] px-4 font-bold text-white shadow-[0_16px_32px_hsl(271_52%_32%/0.28)] hover:bg-[hsl(271_52%_26%)] xl:w-auto"
+                >
+                  Acessar painel
+                </Button>
+              </div>
+            </div>
+          </header>
+        )}
+
+        {currentUser && (
+          <header className="print:hidden relative z-40 border-b border-[#e9e0f0] bg-white/95 backdrop-blur">
+            <div className="mx-auto flex min-h-20 max-w-[1440px] flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8">
+              <button type="button" onClick={() => setActiveTab(getDefaultTabForRole(currentUser.role))} className="min-w-0 flex-1 text-left sm:flex-none">
+                <div className="lovable-display text-base font-semibold text-[hsl(270_25%_14%)]">CIPF</div>
+                <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-[hsl(270_8%_42%)]">Iperó · Área interna</div>
+              </button>
+
+              <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:justify-between lg:w-auto lg:flex-1 lg:flex-nowrap lg:justify-end">
+                <form onSubmit={submitGlobalSearch} className="hidden w-full max-w-xs xl:block 2xl:max-w-sm">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#7a6c86]" />
+                    <input
+                      value={globalSearch}
+                      onChange={(event) => setGlobalSearch(event.target.value)}
+                      placeholder="Buscar cadastro..."
+                      className="h-10 w-full rounded-xl border border-transparent bg-[#faf8fb] pl-9 pr-3 text-sm text-[#251832] outline-none focus:border-[#d8c6e8] focus:bg-white focus:shadow-[0_0_0_3px_rgba(123,44,191,0.12)]"
+                    />
+                  </div>
+                </form>
+
+                <div className="shrink-0">
+                  <Notifications />
+                </div>
+                <div className="hidden h-10 w-px bg-[#ece7f3] xl:block" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#f1eaf8] text-xs font-black text-[var(--fibro-purple)]">
+                  {initials}
+                </div>
+                <div className="hidden text-right 2xl:block">
+                  <p className="max-w-[12rem] truncate text-sm font-bold leading-tight text-[#170b24]">{currentUser.name}</p>
+                  <p className="mt-0.5 text-[11px] text-[#6f617b]">{getRoleLabel(currentUser.role)}</p>
+                </div>
+                {(AUTH_MODE !== 'supabase' || !IS_PRODUCTION) && (
+                  <span className="hidden rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-700 xl:inline-flex">
+                    Teste
+                  </span>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={logout}
+                  className="h-10 w-10 rounded-md text-[#6f617b] hover:bg-[#f8f5fb] hover:text-[var(--fibro-purple)]"
+                  title="Sair"
+                >
+                  <LogOut className="h-5 w-5" />
+                </Button>
+              </div>
+            </div>
+          </header>
+        )}
+
+        {currentUser ? (
+          <div className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:gap-6 lg:px-8">
+            {!isAdminBlockedByMfa ? <InternalNavigation activeTab={activeTab} currentUser={currentUser} onSelect={setActiveTab} /> : null}
+            <div className="min-w-0 flex-1 space-y-4">
+              {isAdminBlockedByMfa && (
+                <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-black">MFA obrigatorio para perfil administrador</p>
+                    <p className="mt-1">Conta marcada como Administrador, mas sem MFA ativo. Acesso reduzido para Consulta ate concluir MFA.</p>
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Button type="button" onClick={() => setActiveTab('configuracoes')} className="h-10 whitespace-nowrap">
+                      Ative MFA para liberar perfil administrador
+                    </Button>
+                    <Button type="button" variant="outline" onClick={logout} className="h-10 whitespace-nowrap">
+                      Sair
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <PublicRoutes activeTab={activeTab} />
+            </div>
+          </div>
+        ) : mfaChallenge.required ? (
+          <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:py-6">
+            <MfaChallenge />
+          </main>
+        ) : (
+          <PublicRoutes activeTab={activeTab} />
+        )}
+
+        {isPublicShell && !isStandalonePublicPage && !hideGlobalPublicFooter && (
+          <footer className="print:hidden mt-auto border-t border-[#ece7f3] bg-white px-4 py-4 text-xs text-[#6f617b]">
+            <div className="mx-auto flex max-w-7xl flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p>© 2026 Prefeitura de Iperó · Secretaria Municipal de Saúde</p>
+                <p className="mt-1 font-medium">{APP_NAME} · Versão {APP_VERSION}</p>
+              </div>
+              <nav className="flex flex-wrap items-center gap-5" aria-label="Links institucionais">
+                {[
+                  { label: 'Privacidade', tab: 'privacidade' },
+                  { label: 'Termos', tab: 'termos' },
+                  { label: 'Contato', tab: 'contato' }
+                ].map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => setActiveTab(item.tab)}
+                    className="font-medium text-[#6f617b] hover:text-[var(--fibro-purple)]"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </nav>
+            </div>
+          </footer>
+        )}
+      </Tabs>
+    </div>
+  );
+}

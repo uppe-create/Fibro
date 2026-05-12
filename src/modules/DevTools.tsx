@@ -100,9 +100,8 @@ export function DevTools() {
       }
 
       await fetchRegistrations();
-      alert('5 cadastros falsos gerados em analise.');
+      alert('5 cadastros falsos gerados em análise.');
     } catch (error: any) {
-      console.error(error);
       if (error?.code === 'PGRST205' || String(error?.message || '').includes('schema cache')) {
         alert('Supabase sem schema pronto para o app. Rode o arquivo supabase-schema.sql no SQL Editor do projeto.');
         return;
@@ -129,7 +128,7 @@ export function DevTools() {
         <div className="bg-red-50/50 border border-red-100 rounded-2xl p-6 mb-8">
           <h3 className="font-medium text-red-800 mb-2">Gerador de Dados Falsos</h3>
           <p className="text-sm text-red-600/80 mb-6">
-            Isso cria 5 registros aleatorios em analise para testar dashboard, filtros e graficos. Requer VITE_ALLOW_DEV_TOOLS=true.
+            Isso cria 5 registros aleatórios em análise para testar dashboard, filtros e gráficos. Requer VITE_ALLOW_DEV_TOOLS=true.
           </p>
           <Button
             onClick={generateFakeUsers}

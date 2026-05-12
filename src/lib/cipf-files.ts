@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { createCipfSignedUrl } from '@/lib/storage-files';
 
 /**
  * Rehydrates file payloads stored as chunked Base64 in Supabase.
@@ -6,6 +7,9 @@ import { supabase } from '@/lib/supabase';
  */
 export async function loadCipfFileDataUri(fileId?: string, fallback = ''): Promise<string> {
   if (!fileId) return fallback;
+
+  const signedUrl = await createCipfSignedUrl(fileId).catch(() => '');
+  if (signedUrl) return signedUrl;
 
   try {
     const { data: fileData, error: fileError } = await supabase
@@ -26,8 +30,7 @@ export async function loadCipfFileDataUri(fileId?: string, fallback = ''): Promi
 
     if (chunkError || !chunks?.length) return fallback;
     return chunks.map((chunk) => chunk.data || '').join('');
-  } catch (error) {
-    console.error('Error loading CIPF file data:', error);
+  } catch {
     return fallback;
   }
 }
@@ -55,4 +58,3 @@ export function openInNewTab(dataUriOrUrl: string): void {
   window.open(blobUrl, '_blank');
   setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
 }
-
