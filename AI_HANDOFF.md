@@ -37,7 +37,7 @@ Fluxo:
 - `src/App.tsx`: entrada fina.
 - `src/app/AppShell.tsx`: shell, sessao, navegacao, lazy modules e bloqueio MFA.
 - `src/app/PublicRoutes.tsx`: rotas publicas/protegidas.
-- `src/store/useAppStore.ts`: auth, MFA, sessao, registros, backup, limpeza.
+- `src/store/useAppStore.ts`: auth, MFA, sessao, registros e limpeza.
 - `src/lib/permissions.ts`: matriz unica de permissoes.
 - `src/lib/auth-mode.ts`: trava auth insegura em producao.
 - `src/lib/admin-rpc.ts`: ponte frontend para RPC administrativa.
@@ -55,6 +55,8 @@ Fluxo:
 - `src/modules/Configuracoes.tsx`: setup e verify de MFA.
 - `src/modules/MfaChallenge.tsx`: segundo fator no login.
 - `src/modules/Valida.tsx`: validacao publica.
+- `src/lib/public-home-metrics.ts`: RPC publica agregada da home.
+- `docs/lgpd/*`: base legal, direitos do titular, incidente e inventario inicial.
 
 ## SQL e Banco
 
@@ -75,6 +77,8 @@ Migracoes principais:
 - `20260512093000_auth_rls_prep.sql`
 - `20260512094000_storage_private_documents.sql`
 - `20260512095000_hardening_production.sql`
+- `20260514110000_public_home_metrics.sql`
+- `20260514133000_lgpd_hardening_exports_and_rls.sql`
 
 Teste SQL:
 
@@ -86,6 +90,7 @@ RPCs criticas:
 - `log_audit_event`
 - `admin_transition_registration`
 - `admin_request_export`
+- `get_home_metrics`
 
 ## Regras de Negocio
 
@@ -113,6 +118,8 @@ Validado:
 5. Admin sem MFA vira `viewer`.
 6. Storage privado nao expoe objeto para `anon`.
 7. Workflow sensivel usa RPC em `auth_mode=supabase`.
+8. Backup JSON integral foi desabilitado.
+9. Politica de privacidade evita claims sem implementacao comprovada.
 
 Ainda depende de configuracao no Supabase:
 
@@ -136,3 +143,4 @@ Ainda depende de configuracao no Supabase:
 - Migrar `notifyPatient`, `registerPickup` e `clearDatabase` para RPC/Edge.
 - Remover SQL legado da raiz quando deploy usar so `supabase/migrations`.
 - Adicionar E2E Supabase Auth real com ambiente de teste dedicado.
+- Alinhar historico remoto de migrations antes de voltar a usar `supabase db push`.

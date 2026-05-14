@@ -44,6 +44,12 @@ export function maskCpf(cpf: string): string {
   return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '***.$2.***-**');
 }
 
+export function formatCpf(cpf: string): string {
+  const digits = toDigits(cpf);
+  if (digits.length !== 11) return cpf;
+  return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+}
+
 export function normalizeForExport(reg: CIPFRegistration) {
   return {
     nome: reg.fullName,
@@ -153,7 +159,7 @@ export function buildSafeRegistrationSummary(reg: CIPFRegistration): string {
   const issues = getDocumentIssues(reg);
   return [
     `Titular: ${reg.fullName}`,
-    `CPF: ${maskCpf(reg.cpf)}`,
+    `CPF: ${formatCpf(reg.cpf)}`,
     `Status: ${getStatusLabel(reg.status)}`,
     `Validade: ${reg.expiryDate || '-'}`,
     `Telefone: ${formatPhone(reg.phone || '') || '-'}`,

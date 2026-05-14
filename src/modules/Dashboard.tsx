@@ -1,23 +1,21 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CalendarClock, Download, FileDown, FileWarning, LayoutDashboard, PackageCheck, RefreshCw, ShieldAlert, Users } from 'lucide-react';
+import { ArrowRight, CalendarClock, Download, FileDown, FileWarning, LayoutDashboard, PackageCheck, RefreshCw, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageHeader } from '@/components/ui/layout';
-import { ModalShell } from '@/components/ui/modal-shell';
 import { buildMonthlyReport } from '@/lib/dashboard-utils';
 import { hasPermission, type Permission } from '@/lib/permissions';
 import { getStatusLabel } from '@/lib/registration-status';
 import { useAppStore } from '@/store/useAppStore';
+import { InfoCard } from './dashboard/components/StatusParts';
 import { useDashboardData } from './dashboard/hooks/useDashboardData';
 import { useDashboardExports } from './dashboard/hooks/useDashboardExports';
 import { useRegistrationWorkflow } from './dashboard/hooks/useRegistrationWorkflow';
-import { InfoCard } from './dashboard/components/StatusParts';
 
 export function Dashboard() {
   const { registrations, currentUser, fetchRegistrations, setActiveTab, exportDatabase } = useAppStore();
   const [loadError, setLoadError] = useState('');
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [backupOpen, setBackupOpen] = useState(false);
   const dashboard = useDashboardData(registrations);
   const workflow = useRegistrationWorkflow({ currentUser, reload: async () => fetchRegistrations(), onError: setMessage });
   const exports = useDashboardExports({ writeAudit: workflow.writeAudit, exportDatabase, onError: setMessage });
@@ -40,8 +38,8 @@ export function Dashboard() {
 
   const shortcuts = [
     { label: 'Abrir Pessoas', description: 'Pesquisar e editar cadastros.', tab: 'pessoas', icon: Users, permission: 'viewPeople' },
-    { label: 'Operação', description: 'Aprovar e emitir.', tab: 'operacao', icon: LayoutDashboard, permission: 'viewOperations' },
-    { label: 'Documentos', description: 'Pendências.', tab: 'documentos', icon: FileWarning, permission: 'viewDocumentsQueue' },
+    { label: 'Aprovar cadastros', description: 'Conferir documentos, aprovar e emitir.', tab: 'operacao', icon: LayoutDashboard, permission: 'viewOperations' },
+    { label: 'Documentos', description: 'Pendencias.', tab: 'documentos', icon: FileWarning, permission: 'viewDocumentsQueue' },
     { label: 'Retiradas', description: 'Confirmar entregas presenciais.', tab: 'retiradas', icon: PackageCheck, permission: 'viewPickupQueue' }
   ].filter((item) => hasPermission(currentUser, item.permission as Permission));
 
@@ -82,7 +80,7 @@ export function Dashboard() {
         <div className="cipf-panel p-6 sm:p-8">
           <div className="mb-6">
             <p className="text-xs font-black uppercase tracking-[0.2em] text-[#005eb8]">Resumo</p>
-            <h3 className="mt-2 text-2xl font-black tracking-tight text-[#071d41]">Situação da base</h3>
+            <h3 className="mt-2 text-2xl font-black tracking-tight text-[#071d41]">Situacao da base</h3>
             <p className="mt-2 text-sm leading-6 text-[#617184]">Indicadores principais.</p>
           </div>
 
@@ -143,7 +141,7 @@ export function Dashboard() {
       <section className="cipf-panel p-6 sm:p-8">
         <div className="mb-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-[#005eb8]">Território</p>
+            <p className="text-xs font-black uppercase tracking-[0.2em] text-[#005eb8]">Territorio</p>
             <h3 className="mt-2 text-2xl font-black tracking-tight text-[#071d41]">Bairros com maior volume</h3>
           </div>
           <Button type="button" variant="outline" onClick={() => setActiveTab('pessoas')} className="rounded-xl">
@@ -168,9 +166,9 @@ export function Dashboard() {
         <section className="cipf-panel p-6 sm:p-8">
           <div className="mb-6 flex flex-col justify-between gap-5 xl:flex-row xl:items-end">
             <div>
-              <p className="cipf-kicker">Relatórios</p>
-              <h3 className="cipf-title mt-2 text-2xl">Indicadores e exportações</h3>
-              <p className="cipf-description mt-2 max-w-2xl text-sm">CSV, PDF, relatório mensal e backup guiado ficam juntos da visão executiva.</p>
+              <p className="cipf-kicker">Relatorios</p>
+              <h3 className="cipf-title mt-2 text-2xl">Indicadores e exportacoes</h3>
+              <p className="cipf-description mt-2 max-w-2xl text-sm">CSV, PDF e relatorio mensal ficam juntos da visao executiva.</p>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               <Button type="button" variant="outline" onClick={() => exports.exportCsv(registrations)}>
@@ -185,33 +183,17 @@ export function Dashboard() {
                 <CalendarClock className="mr-2 h-4 w-4" />
                 Mensal
               </Button>
-              <Button type="button" onClick={() => setBackupOpen(true)}>
-                <ShieldAlert className="mr-2 h-4 w-4" />
-                Backup
-              </Button>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-6 md:grid-cols-3 xl:grid-cols-5">
-            <InfoCard label="Emitidas mês" value={monthlyReport.issued} tone="green" />
+            <InfoCard label="Emitidas mes" value={monthlyReport.issued} tone="green" />
             <InfoCard label="Aprovadas" value={monthlyReport.approved} />
-            <InfoCard label="Retiradas mês" value={monthlyReport.pickedUp} tone="green" />
+            <InfoCard label="Retiradas mes" value={monthlyReport.pickedUp} tone="green" />
             <InfoCard label="Vencidas" value={monthlyReport.expired} tone="red" />
             <InfoCard label="Pend. docs" value={monthlyReport.documentIssues} tone="amber" />
           </div>
         </section>
-      )}
-
-      {backupOpen && (
-        <ModalShell open onClose={() => setBackupOpen(false)} title="Baixar cópia de segurança" description="O arquivo pode conter dados pessoais e documentos sensíveis." size="md">
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-            Guarde o backup somente em local autorizado pela Secretaria. Não envie por aplicativos pessoais.
-          </div>
-          <div className="mt-5 flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setBackupOpen(false)}>Cancelar</Button>
-            <Button type="button" onClick={async () => { await exports.guidedBackup(); setBackupOpen(false); }}>Baixar backup</Button>
-          </div>
-        </ModalShell>
       )}
     </div>
   );
@@ -221,8 +203,8 @@ function Header({ onRefresh, isLoading }: { onRefresh: () => void; isLoading: bo
   return (
     <PageHeader
       eyebrow="Painel executivo"
-      title="Visão geral da CIPF"
-      description="Indicadores para acompanhar a saúde da operação. Use Pessoas e Operação para trabalhar nos cadastros."
+      title="Visao geral da CIPF"
+      description="Indicadores para acompanhar a saude da operacao. Use Aprovar cadastros para conferir documentos e liberar emissoes."
       tone="blue"
       actions={
         <Button type="button" variant="outline" onClick={onRefresh} disabled={isLoading}>

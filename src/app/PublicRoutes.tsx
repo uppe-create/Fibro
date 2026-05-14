@@ -1,4 +1,4 @@
-import React, { Component, Suspense, useEffect, useState } from 'react';
+﻿import React, { Component, Suspense, useEffect, useState } from 'react';
 import { Loader2, ShieldCheck } from 'lucide-react';
 import { TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -61,9 +61,9 @@ class AppErrorBoundary extends (Component as any) {
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#f4ecff] text-[#7b2cbf]">
             <Loader2 className="h-6 w-6" />
           </div>
-          <h2 className="text-xl font-semibold text-[#071d41]">Não foi possível abrir esta tela</h2>
+          <h2 className="text-xl font-semibold text-[#071d41]">Nao foi possivel abrir esta tela</h2>
           <p className="mt-2 text-sm leading-6 text-[#617184]">
-            O módulo encontrou uma falha temporária durante a troca de páginas. Tente abrir outra aba ou recarregue o sistema.
+            O modulo encontrou uma falha temporaria durante a troca de paginas. Tente abrir outra aba ou recarregue o sistema.
           </p>
           <Button type="button" onClick={() => window.location.reload()} className="mt-5 h-11 rounded-xl bg-[#071d41] px-5 text-white hover:bg-[#102b55]">
             Recarregar sistema
@@ -78,8 +78,8 @@ function ModuleFallback() {
   return (
     <div className="flex min-h-[55vh] flex-col items-center justify-center rounded-[1.25rem] border border-[#e3e9ef] bg-white/80 py-12 text-[#617184]">
       <Loader2 className="mb-3 h-7 w-7 animate-spin text-[#155c9c]" />
-      <p className="text-sm font-semibold text-[#17324d]">Carregando módulo...</p>
-      <p className="mt-1 text-xs">Abrindo somente o necessário para deixar o app mais leve.</p>
+      <p className="text-sm font-semibold text-[#17324d]">Carregando modulo...</p>
+      <p className="mt-1 text-xs">Abrindo somente o necessario para deixar o app mais leve.</p>
     </div>
   );
 }
@@ -87,7 +87,7 @@ function ModuleFallback() {
 function ProtectedRoute({
   children,
   permission,
-  deniedMessage = 'Sua conta não tem permissão para acessar esta área.'
+  deniedMessage = 'Sua conta nao tem permissao para acessar esta area.'
 }: {
   children: React.ReactNode;
   permission?: Permission;
@@ -220,19 +220,19 @@ export function PublicRoutes({ activeTab }: { activeTab: string }) {
             </TabsContent>
 
             <TabsContent value="dashboard" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewDashboard" deniedMessage="Este perfil pode consultar carteirinhas, mas não acessa o dashboard administrativo.">
+              <ProtectedRoute permission="viewDashboard" deniedMessage="Este perfil pode consultar carteirinhas, mas nao acessa o dashboard administrativo.">
                 <Dashboard />
               </ProtectedRoute>
             </TabsContent>
 
             <TabsContent value="pessoas" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewPeople" deniedMessage="Este perfil não acessa a lista interna de pessoas.">
+              <ProtectedRoute permission="viewPeople" deniedMessage="Este perfil nao acessa a lista interna de pessoas.">
                 <Pessoas />
               </ProtectedRoute>
             </TabsContent>
 
             <TabsContent value="operacao" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewOperations" deniedMessage="Apenas administradores acessam a operação administrativa.">
+              <ProtectedRoute permission="viewOperations" deniedMessage="Apenas administradores acessam a operacao administrativa.">
                 <Operacao />
               </ProtectedRoute>
             </TabsContent>
@@ -250,7 +250,7 @@ export function PublicRoutes({ activeTab }: { activeTab: string }) {
             </TabsContent>
 
             <TabsContent value="relatorios" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewReports" deniedMessage="Apenas administradores acessam relatÃ³rios e exportaÃ§Ãµes.">
+              <ProtectedRoute permission="viewReports" deniedMessage="Apenas administradores acessam relatorios e exportacoes.">
                 <Relatorios />
               </ProtectedRoute>
             </TabsContent>
@@ -262,7 +262,7 @@ export function PublicRoutes({ activeTab }: { activeTab: string }) {
             </TabsContent>
 
             <TabsContent value="configuracoes" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewSettings" deniedMessage="Este perfil não acessa configurações do sistema.">
+              <ProtectedRoute permission="viewSettings" deniedMessage="Este perfil nao acessa configuracoes do sistema.">
                 <Configuracoes />
               </ProtectedRoute>
             </TabsContent>

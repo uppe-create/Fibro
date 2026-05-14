@@ -1,6 +1,6 @@
 import { CalendarClock, Eye, FileBadge2, FileText, MoreHorizontal, Pencil, ShieldAlert, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { getExpiryHighlight, isReadyToPrint, maskCpf } from '@/lib/dashboard-utils';
+import { formatCpf, getExpiryHighlight, isReadyToPrint } from '@/lib/dashboard-utils';
 import { isPrintableStatus } from '@/lib/registration-status';
 import type { CIPFRegistration } from '@/store/useAppStore';
 import { StatusChip } from './StatusParts';
@@ -74,7 +74,7 @@ export function DashboardResults({ registrations, isLoading, permissions, onPrev
                         </button>
                       </div>
                     </td>
-                    <td className="px-5 py-4 font-mono text-xs text-[#4f455f]">{maskCpf(reg.cpf)}</td>
+                    <td className="px-5 py-4 font-mono text-xs text-[#4f455f]">{formatCpf(reg.cpf)}</td>
                     <td className="px-5 py-4 font-mono text-xs text-[#4f455f]">{formatCns(reg.cns)}</td>
                     <td className="px-5 py-4 text-[#4f455f]">{reg.bairro || '-'}</td>
                     <td className="px-5 py-4"><StatusChip status={reg.status} /></td>
@@ -135,7 +135,7 @@ function MobileCard(props: Omit<Props, 'registrations' | 'isLoading'> & { reg: C
           <Initials name={reg.fullName} />
           <div className="min-w-0">
             <p className="break-words text-sm font-bold leading-5 text-[#170b24]">{reg.fullName}</p>
-            <p className="text-xs text-[#6f617b]">{maskCpf(reg.cpf)}</p>
+            <p className="text-xs text-[#6f617b]">{formatCpf(reg.cpf)}</p>
             <p className="text-xs text-[#6f617b]">{reg.bairro || '-'} - Validade {reg.expiryDate || '-'}</p>
           </div>
         </div>

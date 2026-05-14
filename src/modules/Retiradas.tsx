@@ -4,10 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/layout';
 import { ModalShell } from '@/components/ui/modal-shell';
-import { buildWhatsAppMessage, buildWhatsAppUrl, isAwaitingPickup, maskCpf, toDigits } from '@/lib/dashboard-utils';
+import { buildWhatsAppMessage, buildWhatsAppUrl, formatCpf, isAwaitingPickup, toDigits } from '@/lib/dashboard-utils';
 import { formatPhone } from '@/lib/utils';
 import { useAppStore, type CIPFRegistration } from '@/store/useAppStore';
 import { useRegistrationWorkflow } from './dashboard/hooks/useRegistrationWorkflow';
+
+const PEOPLE_SEARCH_STORAGE_KEY = 'cipf_people_search';
+const FOCUS_REGISTRATION_STORAGE_KEY = 'cipf_focus_registration_id';
 
 type PickupDraft = {
   reg: CIPFRegistration;
@@ -47,6 +50,22 @@ export function Retiradas() {
   useEffect(() => {
     void loadData();
   }, []);
+
+  useEffect(() => {
+    const externalSearch = sessionStorage.getItem(PEOPLE_SEARCH_STORAGE_KEY);
+    const focusId = sessionStorage.getItem(FOCUS_REGISTRATION_STORAGE_KEY);
+    if (externalSearch) {
+      setSearchTerm(externalSearch);
+      sessionStorage.removeItem(PEOPLE_SEARCH_STORAGE_KEY);
+      sessionStorage.removeItem(FOCUS_REGISTRATION_STORAGE_KEY);
+      return;
+    }
+    if (!focusId || registrations.length === 0) return;
+    const focused = registrations.find((reg) => reg.id === focusId);
+    if (!focused) return;
+    setSearchTerm(toDigits(focused.cpf) || focused.fullName);
+    sessionStorage.removeItem(FOCUS_REGISTRATION_STORAGE_KEY);
+  }, [registrations]);
 
   const pickupQueue = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -106,7 +125,7 @@ export function Retiradas() {
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div className="min-w-0">
                   <p className="truncate text-base font-semibold text-[var(--brand-ink)]">{reg.fullName}</p>
-                  <p className="mt-1 text-xs text-[#617184]">{maskCpf(reg.cpf)} • Validade {reg.expiryDate || '-'} • {formatPhone(reg.phone || '') || 'Telefone não informado'}</p>
+                  <p className="mt-1 text-xs text-[#617184]">{formatCpf(reg.cpf)} • Validade {reg.expiryDate || '-'} • {formatPhone(reg.phone || '') || 'Telefone não informado'}</p>
                   <p className="mt-2 text-sm font-semibold text-[#7b2cbf]">Emitida e aguardando retirada presencial.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">

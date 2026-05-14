@@ -4,34 +4,30 @@ import { useAppStore } from '@/store/useAppStore';
 
 const SECTIONS = [
   {
-    title: '1. Aceitação dos termos',
+    title: '1. Aceitacao dos termos',
     body: (
       <p className="mt-3">
-        Ao acessar e utilizar a plataforma do programa CIPF, você declara ter lido, compreendido
-        e concordado com estes Termos de Uso, bem como com a Política de Privacidade. Caso não
-        concorde com qualquer disposição, recomendamos que não utilize o serviço.
+        Ao usar a plataforma do programa CIPF, o usuario declara que compreende a finalidade
+        administrativa do sistema e que fornecera apenas informacoes verdadeiras e atualizadas.
       </p>
     )
   },
   {
-    title: '2. Sobre o serviço',
+    title: '2. Sobre o servico',
     body: (
       <p className="mt-3">
-        O CIPF - Carteirinha de Identificação da Pessoa com Fibromialgia - é um serviço público
-        gratuito oferecido pela Secretaria Municipal de Saúde, com base na Lei Municipal nº
-        8.452/2024. Tem por finalidade emitir documento oficial de identificação e garantir o
-        atendimento prioritário previsto em lei.
+        O CIPF e um servico publico municipal para cadastro, analise, emissao, renovacao,
+        cancelamento e validacao da carteirinha da pessoa com fibromialgia.
       </p>
     )
   },
   {
-    title: '3. Cadastro e veracidade das informações',
+    title: '3. Cadastro e veracidade',
     body: (
       <p className="mt-3">
-        O usuário é responsável pela exatidão, veracidade e atualização das informações
-        fornecidas. A apresentação de dados ou laudos falsos pode acarretar o cancelamento do
-        cadastro e responsabilização nas esferas civil e criminal, conforme art. 299 do Código
-        Penal.
+        O titular ou representante legal responde pela exatidao das informacoes e dos documentos
+        apresentados. Dados falsos, laudos indevidos ou uso de identidade de terceiro podem gerar
+        cancelamento do registro e responsabilizacao administrativa, civil ou penal.
       </p>
     )
   },
@@ -39,81 +35,60 @@ const SECTIONS = [
     title: '4. Uso adequado da plataforma',
     body: (
       <>
-        <p className="mt-3">É vedado ao usuário:</p>
+        <p className="mt-3">Nao e permitido:</p>
         <ul className="mt-3 list-disc space-y-1.5 pl-6">
-          <li>Utilizar a plataforma para fins ilícitos ou fraudulentos.</li>
-          <li>Tentar burlar mecanismos de segurança ou autenticação.</li>
-          <li>Reproduzir, copiar ou distribuir conteúdo da plataforma sem autorização.</li>
-          <li>Criar perfis em nome de terceiros sem o devido consentimento.</li>
+          <li>Usar a plataforma para fraude, teste destrutivo ou acesso indevido.</li>
+          <li>Tentar contornar autenticacao, MFA, auditoria ou controles de permissao.</li>
+          <li>Compartilhar credenciais institucionais com terceiros.</li>
+          <li>Submeter documentos de outra pessoa sem representacao legitima.</li>
         </ul>
       </>
     )
   },
   {
-    title: '5. Propriedade intelectual',
+    title: '5. Fluxo operacional',
     body: (
       <p className="mt-3">
-        Todo o conteúdo da plataforma - incluindo marca, logotipos, textos, layout e software -
-        é de titularidade da Secretaria Municipal de Saúde ou de seus licenciantes. É proibida a
-        sua reprodução total ou parcial sem autorização expressa.
+        O cadastro entra em analise, pode ser aprovado e somente depois emitido. A carteirinha
+        emitida tem validade padrao de 2 anos, sujeita a renovacao, cancelamento, segunda via ou
+        arquivamento conforme o fluxo interno do programa.
       </p>
     )
   },
   {
-    title: '6. Validade da carteirinha',
+    title: '6. Disponibilidade',
     body: (
       <p className="mt-3">
-        A carteirinha emitida tem validade de 5 (cinco) anos, podendo ser renovada digitalmente.
-        A revogação pode ocorrer em casos de fraude, descumprimento destes Termos ou por
-        solicitação do próprio titular.
+        A Secretaria busca manter a plataforma disponivel, mas pode realizar manutencoes, ajustes
+        de seguranca ou indisponibilidades temporarias para proteger dados e continuidade do
+        servico.
       </p>
     )
   },
   {
-    title: '7. Disponibilidade do serviço',
+    title: '7. Privacidade e seguranca',
     body: (
       <p className="mt-3">
-        Empenhamo-nos para manter a plataforma disponível continuamente, mas não garantimos
-        ausência total de interrupções. Eventuais manutenções programadas serão comunicadas com
-        antecedência sempre que possível.
+        O uso da plataforma tambem segue a Politica de Privacidade publicada no proprio sistema.
+        Documentos e dados sensiveis devem ser tratados apenas dentro do fluxo oficial e em
+        equipamento autorizado.
       </p>
     )
   },
   {
-    title: '8. Limitação de responsabilidade',
+    title: '8. Alteracoes',
     body: (
       <p className="mt-3">
-        A Secretaria não se responsabiliza por danos decorrentes do uso indevido da plataforma,
-        falhas de conexão de responsabilidade do usuário ou de terceiros, ou por informações
-        fornecidas incorretamente pelo próprio titular.
+        Estes termos podem ser atualizados para refletir mudancas legais, tecnicas ou operacionais.
+        A data da ultima revisao fica publicada nesta pagina.
       </p>
     )
   },
   {
-    title: '9. Alterações dos termos',
+    title: '9. Contato',
     body: (
       <p className="mt-3">
-        Estes Termos podem ser modificados a qualquer momento, sendo a data da última atualização
-        sempre indicada no topo desta página. O uso contínuo do serviço após alterações implica
-        concordância com a nova versão.
-      </p>
-    )
-  },
-  {
-    title: '10. Lei aplicável e foro',
-    body: (
-      <p className="mt-3">
-        Estes Termos são regidos pelas leis da República Federativa do Brasil. Fica eleito o foro
-        da comarca da sede do município para dirimir quaisquer controvérsias, com renúncia a
-        qualquer outro, por mais privilegiado que seja.
-      </p>
-    )
-  },
-  {
-    title: '11. Contato',
-    body: (
-      <p className="mt-3">
-        Em caso de dúvidas sobre estes Termos:
+        Para duvidas sobre o servico:
         <br />
         <strong>E-mail:</strong>{' '}
         <a href="mailto:saude@ipero.sp.gov.br" className="text-[hsl(271_52%_32%)] hover:underline">
@@ -142,7 +117,7 @@ export function Termos() {
             onClick={() => setActiveTab('inicio')}
             className="inline-flex items-center gap-2 text-sm text-[hsl(270_8%_42%)] transition hover:text-[hsl(270_25%_14%)]"
           >
-            <ArrowLeft className="h-4 w-4" /> Voltar ao início
+            <ArrowLeft className="h-4 w-4" /> Voltar ao inicio
           </button>
         </div>
       </header>
@@ -152,9 +127,9 @@ export function Termos() {
           Termos de Uso
         </span>
         <h1 className="font-display mt-4 text-4xl font-semibold leading-tight md:text-5xl">
-          Condições gerais do serviço.
+          Condicoes gerais do servico.
         </h1>
-        <p className="mt-4 text-sm text-[hsl(270_8%_42%)]">Última atualização: 8 de maio de 2026</p>
+        <p className="mt-4 text-sm text-[hsl(270_8%_42%)]">Ultima atualizacao: 14 de maio de 2026</p>
 
         <div className="mt-12 space-y-10 leading-relaxed text-[hsl(270_25%_14%/0.85)]">
           {SECTIONS.map((section) => (
@@ -170,7 +145,7 @@ export function Termos() {
 
       <footer className="mt-12 border-t border-[hsl(270_15%_90%)] py-8">
         <div className="mx-auto max-w-[1240px] px-4 text-center text-xs text-[hsl(270_8%_42%)] md:px-8">
-          © 2026 Secretaria Municipal de Saúde · CIPF
+          (c) 2026 Secretaria Municipal de Saude - CIPF
         </div>
       </footer>
     </div>

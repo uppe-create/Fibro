@@ -41,7 +41,7 @@ export function MfaChallenge() {
 
         <div className="px-6 py-6">
           <p className="text-sm leading-6 text-[#6f617b]">
-            Digite o código de 6 dígitos do aplicativo autenticador para liberar o acesso.
+            Digite o código de 6 dígitos do autenticador para liberar o acesso. Ele pode estar no celular ou em cofre/autenticador no computador, como 1Password, Bitwarden, Authy Desktop ou Apple Senhas.
             {mfaChallenge.email ? ` Conta: ${mfaChallenge.email}.` : null}
           </p>
 
@@ -83,7 +83,7 @@ export function MfaChallenge() {
             </Button>
 
             <Button type="button" variant="outline" onClick={() => void cancelMfaChallenge()} className="h-11 w-full rounded-lg">
-              Sair
+              Sair definitivo
             </Button>
           </form>
         </div>

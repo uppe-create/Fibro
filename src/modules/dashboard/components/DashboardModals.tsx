@@ -1,4 +1,4 @@
-import { CalendarClock, Copy, Loader2, MessageCircle, Save, StickyNote } from 'lucide-react';
+import { CalendarClock, Copy, FileText, Image as ImageIcon, Loader2, MessageCircle, Save, StickyNote } from 'lucide-react';
 import { useState } from 'react';
 import { AuditTimeline } from '@/components/audit/AuditTimeline';
 import { CarteirinhaPreview } from '@/components/CarteirinhaPreview';
@@ -9,10 +9,10 @@ import type { AuditTimelineEntry } from '@/lib/audit-events';
 import {
   buildWhatsAppMessage,
   buildWhatsAppUrl,
+  formatCpf,
   getChecklistItems,
   getDocumentIssues,
   getNextOperationalAction,
-  maskCpf,
   toDigits,
   type EditRegistrationForm
 } from '@/lib/dashboard-utils';
@@ -49,6 +49,7 @@ type Props = {
   onResolveIssue: (reg: CIPFRegistration, issue?: string) => void;
   onWorkflow: (action: 'approve' | 'issue' | 'cancel' | 'renew' | 'reissue', reg: CIPFRegistration) => void;
   onOpenHistory: (reg: CIPFRegistration) => void;
+  onOpenDocumentFile: (reg: CIPFRegistration, kind: DocumentFileKind) => void;
   onConfirmWhatsApp: () => void;
   onConfirmPickup: () => void;
   onConfirmAction: (config: ConfirmActionConfig, value: string) => void;
@@ -59,6 +60,7 @@ type Props = {
     canApproveRegistration: boolean;
     canIssueRegistration: boolean;
     canPrintCarteirinha: boolean;
+    canViewDocuments: boolean;
     canCancelRegistration: boolean;
     canRenewRegistration: boolean;
     canReissueRegistration: boolean;
@@ -66,6 +68,7 @@ type Props = {
 };
 
 const historyFilters = ['all', 'cadastro', 'edicao', 'aprovacao', 'emissao', 'contato', 'retirada', 'renovacao', 'cancelamento', 'documentos', 'observacao'];
+type DocumentFileKind = 'document' | 'proof' | 'medical' | 'photo';
 
 export function DashboardModals(props: Props) {
   const { modal, setModal } = props;
@@ -139,9 +142,12 @@ function DetailModal(props: Props & { reg: CIPFRegistration }) {
             ))}
           </div>
         </div>
+        {props.permissions.canViewDocuments && (
+          <DocumentReviewPanel reg={reg} onOpenDocumentFile={props.onOpenDocumentFile} />
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           {[
-            ['CPF', maskCpf(reg.cpf)],
+            ['CPF', formatCpf(reg.cpf)],
             ['Cartao SUS', reg.cns ? formatCNS(reg.cns) : 'Nao informado'],
             ['Telefone', reg.phone ? formatPhone(reg.phone) : '-'],
             ['CID', reg.cid || '-'],
@@ -164,9 +170,53 @@ function DetailModal(props: Props & { reg: CIPFRegistration }) {
   );
 }
 
+function DocumentReviewPanel({ reg, onOpenDocumentFile }: { reg: CIPFRegistration; onOpenDocumentFile: (reg: CIPFRegistration, kind: DocumentFileKind) => void }) {
+  const files: Array<{ kind: DocumentFileKind; label: string; hint: string; available: boolean; icon: typeof FileText }> = [
+    { kind: 'document', label: 'Documento oficial', hint: 'RG/CNH e CPF', available: Boolean(reg.documentFileId || reg.documentUrl), icon: FileText },
+    { kind: 'proof', label: 'Comprovante', hint: `Data: ${reg.proofOfResidenceDate || '-'}`, available: Boolean(reg.proofOfResidenceFileId || reg.proofOfResidenceUrl), icon: FileText },
+    { kind: 'medical', label: 'Laudo medico', hint: `Data: ${reg.medicalReportDate || '-'} · CID ${reg.cid || '-'}`, available: Boolean(reg.medicalReportFileId || reg.medicalReportUrl), icon: FileText },
+    { kind: 'photo', label: 'Foto 3x4', hint: 'Foto usada na carteirinha', available: Boolean(reg.photoFileId || reg.photoUrl), icon: ImageIcon }
+  ];
+
+  return (
+    <div className="rounded-2xl border border-[#d9e1ea] bg-white p-4">
+      <div className="mb-3">
+        <p className="text-sm font-black text-[#17324d]">Conferir documentos antes de aprovar</p>
+        <p className="mt-1 text-sm text-[#617184]">Abra cada anexo e confira se arquivo pertence ao titular.</p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {files.map((file) => {
+          const Icon = file.icon;
+          return (
+            <button
+              key={file.kind}
+              type="button"
+              onClick={() => onOpenDocumentFile(reg, file.kind)}
+              disabled={!file.available}
+              className={`flex min-h-[72px] items-center gap-3 rounded-xl border p-3 text-left transition ${
+                file.available
+                  ? 'border-[#d9e1ea] bg-[#f8fafc] text-[#17324d] hover:border-[#7b2cbf] hover:bg-white'
+                  : 'border-[#ece7f3] bg-[#f8fafc] text-[#9ca3af]'
+              }`}
+            >
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-[var(--fibro-purple)]">
+                <Icon className="h-5 w-5" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-black">{file.label}</span>
+                <span className="mt-1 block truncate text-xs">{file.available ? file.hint : 'Nao anexado'}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function EditModal({ reg, form, updateEditField, saveEdit, isSavingEdit, setModal }: Props & { reg: CIPFRegistration; form: EditRegistrationForm }) {
   return (
-    <ModalShell open onClose={() => setModal({ editReg: null, editFocusSection: null })} title="Editar Cadastro" description={`CPF ${maskCpf(reg.cpf)} bloqueado para preservar unicidade.`} size="xl">
+    <ModalShell open onClose={() => setModal({ editReg: null, editFocusSection: null })} title="Editar Cadastro" description={`CPF ${formatCpf(reg.cpf)} bloqueado para preservar unicidade.`} size="xl">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Field label="Nome completo" value={form.fullName} onChange={(value) => updateEditField('fullName', value)} wide />
         <label className="space-y-1"><span className="text-xs font-semibold uppercase text-[#86868B]">Status</span><select value={form.status} onChange={(e) => updateEditField('status', e.target.value as EditRegistrationForm['status'])} className="h-11 w-full rounded-xl border border-gray-200 px-3 bg-white">{WORKFLOW_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>

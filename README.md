@@ -15,7 +15,7 @@ Aplicacao web para cadastro, analise, aprovacao, emissao, impressao e validacao 
 
 ## Funcionalidades Principais
 
-- Cadastro guiado com rascunho local automatico.
+- Cadastro guiado com rascunho sensivel desativado por padrao.
 - Validacao de CPF, Cartao SUS, datas, laudo, comprovante e CID.
 - Alerta de possivel duplicidade por CPF e por nome/data de nascimento parecidos.
 - Upload com pre-visualizacao, progresso e aviso quando o arquivo e pesado.
@@ -29,6 +29,8 @@ Aplicacao web para cadastro, analise, aprovacao, emissao, impressao e validacao 
 - Carteirinha em PNG somente para administrador.
 - Validacao publica por QR Code com dados minimos.
 - Em `auth_mode=supabase`, aprovar, emitir, cancelar, renovar, arquivar e autorizar exportacao passam por RPC administrativa.
+- Home publica usa metricas agregadas por RPC, sem expor dado nominal.
+- Politica de privacidade e termos foram alinhados ao fluxo real do sistema.
 
 ## Rodar Localmente
 
@@ -102,6 +104,8 @@ Em `VITE_AUTH_MODE="supabase"`, aplique ao menos:
 1. `20260512090000_initial_schema.sql`
 2. `20260512094000_storage_private_documents.sql`
 3. `20260512095000_hardening_production.sql`
+4. `20260514110000_public_home_metrics.sql`
+5. `20260514133000_lgpd_hardening_exports_and_rls.sql`
 
 ## Publicar no Firebase Hosting
 
@@ -128,5 +132,7 @@ Em `VITE_AUTH_MODE="supabase"`, aplique ao menos:
   - `admin_transition_registration`
   - `admin_request_export`
 - Rascunhos com dados sensiveis e DevTools ficam desativados por padrao por seguranca.
+- Backup JSON integral foi desativado por protecao LGPD; use CSV compativel com Excel ou PDF.
 - A exportacao Excel nativa foi removida junto com `xlsx`; use CSV compativel com Excel ou PDF.
+- Leia `docs/lgpd/` para base legal minima, direitos do titular, resposta a incidente e inventario inicial de tratamento.
 - Leia `SECURITY.md` e `AI_HANDOFF.md` antes de alterar regras de permissao, validacao publica, workflow ou banco.

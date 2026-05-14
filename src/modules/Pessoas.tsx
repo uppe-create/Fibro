@@ -20,6 +20,7 @@ import type { ConfirmActionConfig, DashboardModalState } from './dashboard/lib/t
 import { Auditoria } from './Auditoria';
 
 const PEOPLE_SEARCH_STORAGE_KEY = 'cipf_people_search';
+type DocumentFileKind = 'document' | 'proof' | 'medical' | 'photo';
 
 const initialModalState: DashboardModalState = {
   detailReg: null,
@@ -219,6 +220,22 @@ export function Pessoas() {
     }
   };
 
+  const openDocumentFile = async (reg: CIPFRegistration, kind: DocumentFileKind) => {
+    if (!permissions.canViewDocuments) return;
+    const fileMap = {
+      document: { id: reg.documentFileId, fallback: reg.documentUrl || '', label: 'Documento oficial' },
+      proof: { id: reg.proofOfResidenceFileId, fallback: reg.proofOfResidenceUrl || '', label: 'Comprovante de residencia' },
+      medical: { id: reg.medicalReportFileId, fallback: reg.medicalReportUrl || '', label: 'Laudo medico' },
+      photo: { id: reg.photoFileId, fallback: reg.photoUrl || '', label: 'Foto' }
+    };
+    const file = fileMap[kind];
+    const dataUri = await loadCipfFileDataUri(file.id, file.fallback);
+    if (dataUri) {
+      openInNewTab(dataUri);
+      await workflow.writeAudit(buildAuditEvent('document.sensitive_viewed', { registrationId: reg.id, targetLabel: reg.fullName, details: file.label }));
+    }
+  };
+
   const confirmAction = async (config: ConfirmActionConfig, value: string) => {
     await config.onConfirm(value);
     setModal({ confirmAction: null });
@@ -226,7 +243,7 @@ export function Pessoas() {
 
   const copySummary = async (reg: CIPFRegistration) => {
     await navigator.clipboard.writeText(buildSafeRegistrationSummary(reg));
-    await workflow.writeAudit(buildAuditEvent('export.summary_copied', { registrationId: reg.id, targetLabel: reg.fullName, details: 'Resumo com CPF mascarado e sem dados medicos sensiveis' }));
+    await workflow.writeAudit(buildAuditEvent('export.summary_copied', { registrationId: reg.id, targetLabel: reg.fullName, details: 'Resumo com CPF completo e sem dados medicos sensiveis' }));
   };
 
   return (
@@ -241,7 +258,7 @@ export function Pessoas() {
       <div className="flex flex-col justify-between gap-5 xl:flex-row xl:items-center">
         <div>
           <h3 className="cipf-title text-xl">Cadastros</h3>
-          <p className="cipf-description mt-1 text-sm">{dashboard.filteredRegistrations.length} registro(s) · consulta interna com CPF mascarado.</p>
+          <p className="cipf-description mt-1 text-sm">{dashboard.filteredRegistrations.length} registro(s) · consulta interna com CPF completo.</p>
         </div>
         <ActionGrid>
           {permissions.canExportDashboard && (
@@ -283,6 +300,7 @@ export function Pessoas() {
         onResolveIssue={openEdit}
         onWorkflow={() => undefined}
         onOpenHistory={openHistory}
+        onOpenDocumentFile={openDocumentFile}
         onConfirmWhatsApp={() => undefined}
         onConfirmPickup={() => undefined}
         onConfirmAction={confirmAction}

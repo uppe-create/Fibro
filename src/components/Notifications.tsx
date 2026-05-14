@@ -7,7 +7,7 @@ import { useNotifications } from '@/components/notifications/useNotifications';
 import type { NotificationAction } from '@/components/notifications/notificationRules';
 
 export function Notifications() {
-  const { registrations, fetchRegistrations, currentUser, lastBackupDate, exportDatabase } = useAppStore();
+  const { registrations, fetchRegistrations, currentUser, lastBackupDate, setActiveTab } = useAppStore();
   const [isOpen, setIsOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -31,8 +31,16 @@ export function Notifications() {
   const { sections, unreadCount } = useNotifications({ registrations, currentUser, lastBackupDate });
 
   const handleAction = async (action: NotificationAction) => {
-    if (action.kind === 'backup') {
-      await exportDatabase();
+    if (action.kind === 'link') {
+      window.open(action.href, '_blank', 'noopener,noreferrer');
+      setIsOpen(false);
+      return;
+    }
+
+    if (action.kind === 'navigate') {
+      if (action.registrationId) sessionStorage.setItem('cipf_focus_registration_id', action.registrationId);
+      if (action.search) sessionStorage.setItem('cipf_people_search', action.search);
+      setActiveTab(action.tab);
       setIsOpen(false);
     }
   };

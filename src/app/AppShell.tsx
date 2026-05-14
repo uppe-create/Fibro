@@ -1,5 +1,5 @@
-import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { LogOut, Search, ShieldCheck } from 'lucide-react';
+﻿import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { LockKeyhole, LogOut, Search, ShieldCheck, UnlockKeyhole } from 'lucide-react';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Notifications } from '@/components/Notifications';
@@ -11,18 +11,20 @@ import {
 } from '@/store/useAppStore';
 import { canAccessTab, getDefaultTabForRole, getRoleLabel } from '@/lib/permissions';
 import { InternalNavigation } from '@/app/InternalNavigation';
-import { NavigationTabs } from '@/app/NavigationTabs';
 import { PublicRoutes } from '@/app/PublicRoutes';
 import { APP_NAME, APP_VERSION, AUTH_MODE, IS_PRODUCTION, preloadAppModules, SESSION_CHECK_INTERVAL_MS } from '@/app/appModules';
 import { getProductionAuthError } from '@/lib/auth-mode';
 import { MfaChallenge } from '@/modules/MfaChallenge';
 
 const PEOPLE_SEARCH_STORAGE_KEY = 'cipf_people_search';
+const PUBLIC_HOME_SECTION_STORAGE_KEY = 'cipf_public_home_section';
 
 export function AppShell() {
-  const { currentUser, logout, activeTab, setActiveTab, logAudit, initializeAuth, mfaChallenge } = useAppStore();
+  const { currentUser, isSessionLocked, lockSession, unlockSession, logout, activeTab, setActiveTab, logAudit, initializeAuth, mfaChallenge } = useAppStore();
   const { idleTimeoutMs, maxSessionMs } = getSessionSecurityConfig();
   const [globalSearch, setGlobalSearch] = useState('');
+  const [unlockError, setUnlockError] = useState('');
+  const [isUnlocking, setIsUnlocking] = useState(false);
   const previousUserIdRef = useRef<string | null>(null);
   const productionAuthError = getProductionAuthError((import.meta as any).env || {}, IS_PRODUCTION);
 
@@ -73,12 +75,12 @@ export function AppShell() {
   }, [activeTab, currentUser, setActiveTab]);
 
   const resetTimer = useCallback(() => {
-    if (!currentUser) return;
+    if (!currentUser || isSessionLocked) return;
     localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
-  }, [currentUser]);
+  }, [currentUser, isSessionLocked]);
 
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || isSessionLocked) return;
 
     let expired = false;
     resetTimer();
@@ -86,9 +88,9 @@ export function AppShell() {
     const expireSession = async (reason: string) => {
       if (expired) return;
       expired = true;
-      await logAudit('Sessão Expirada', reason);
+      await logAudit('Sessao Expirada', reason);
       await logout();
-      alert('Sessão encerrada automaticamente por segurança. Faça login novamente.');
+      alert('Sessao encerrada automaticamente por seguranca. Faca login novamente.');
     };
 
     const checkSession = async () => {
@@ -102,7 +104,7 @@ export function AppShell() {
       }
 
       if (now - sessionStartedAt > maxSessionMs) {
-        await expireSession('Tempo máximo de sessão excedido');
+        await expireSession('Tempo maximo de sessao excedido');
       }
     };
 
@@ -117,7 +119,7 @@ export function AppShell() {
       clearInterval(interval);
       activityEvents.forEach((eventName) => window.removeEventListener(eventName, resetTimer));
     };
-  }, [currentUser, idleTimeoutMs, maxSessionMs, logout, logAudit, resetTimer]);
+  }, [currentUser, isSessionLocked, idleTimeoutMs, maxSessionMs, logout, logAudit, resetTimer]);
 
   const submitGlobalSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -127,14 +129,58 @@ export function AppShell() {
     setActiveTab('pessoas');
   };
 
+  const handleUnlock = async () => {
+    setUnlockError('');
+    setIsUnlocking(true);
+    try {
+      await unlockSession();
+    } catch (error: any) {
+      setUnlockError(error?.message || 'Sessao expirada. Entre novamente.');
+    } finally {
+      setIsUnlocking(false);
+    }
+  };
+
   if (productionAuthError) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#2f1450] px-4 text-white">
         <div className="max-w-xl rounded-lg border border-white/20 bg-white/10 p-6 shadow-2xl">
           <ShieldCheck className="mb-4 h-9 w-9 text-amber-200" />
-          <h1 className="text-2xl font-black">Aplicação bloqueada por segurança</h1>
+          <h1 className="text-2xl font-black">Aplicacao bloqueada por seguranca</h1>
           <p className="mt-3 text-sm text-white/80">{productionAuthError}</p>
           <p className="mt-4 text-sm text-white/70">Configure Supabase Auth antes de publicar com dados reais.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (currentUser && isSessionLocked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#fbfafc] px-4 text-[#251832]">
+        <div className="w-full max-w-md rounded-xl border border-[#e9e0f0] bg-white p-6 shadow-[0_18px_50px_rgba(47,20,80,0.10)]">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--fibro-purple)] text-white">
+              <LockKeyhole className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#876d9f]">Sessao bloqueada</p>
+              <h1 className="truncate text-xl font-black text-[#170b24]">{currentUser.name}</h1>
+            </div>
+          </div>
+          <p className="mt-4 text-sm leading-6 text-[#617184]">
+            Sessao Supabase preservada neste navegador. Desbloqueio nao pede MFA enquanto `aal2` continuar valido.
+          </p>
+          {unlockError ? <div className="mt-4 rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-700">{unlockError}</div> : null}
+          <div className="mt-6 grid gap-3">
+            <Button type="button" onClick={() => void handleUnlock()} disabled={isUnlocking} className="h-12 rounded-lg">
+              <UnlockKeyhole className="mr-2 h-4 w-4" />
+              {isUnlocking ? 'Desbloqueando...' : 'Desbloquear'}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void logout()} className="h-11 rounded-lg">
+              <LogOut className="mr-2 h-4 w-4" />
+              Sair definitivo
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -147,6 +193,7 @@ export function AppShell() {
     .map((part) => part[0])
     .join('');
   const isStandalonePublicPage = (activeTab === 'inicio' || activeTab === 'validar') && !currentUser;
+  const hideGlobalPublicHeader = !currentUser && ['privacidade', 'termos', 'contato'].includes(activeTab);
   const hideGlobalPublicFooter = !currentUser && ['privacidade', 'termos', 'contato'].includes(activeTab);
   const isPublicShell = !currentUser;
   const isAdminBlockedByMfa = currentUser?.accessNotice === 'admin_mfa_required' && currentUser.role === 'viewer';
@@ -157,36 +204,45 @@ export function AppShell() {
     setActiveTab('configuracoes');
   }, [activeTab, isAdminBlockedByMfa, setActiveTab]);
 
+  const openPublicHomeSection = useCallback((sectionId: string) => {
+    sessionStorage.setItem(PUBLIC_HOME_SECTION_STORAGE_KEY, sectionId);
+    setActiveTab('inicio');
+  }, [setActiveTab]);
+
   return (
     <div className="min-h-screen bg-[#fbfafc] text-[#251832] selection:bg-[#eadcff]">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-screen flex-col">
-        {isPublicShell && !isStandalonePublicPage && (
+                {isPublicShell && !isStandalonePublicPage && !hideGlobalPublicHeader && (
           <header className="lovable-home print:hidden border-b border-[hsl(270_15%_90%)] bg-white/95 shadow-[0_1px_2px_hsl(270_25%_14%/0.04)] backdrop-blur">
-            <div className="mx-auto flex min-h-20 max-w-[1240px] flex-col gap-4 px-4 py-4 md:px-8 xl:grid xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-center">
-              <button type="button" onClick={() => setActiveTab('inicio')} className="order-1 flex min-w-0 items-center xl:justify-self-start">
-                <div className="min-w-0 text-left leading-tight">
-                  <div className="lovable-display text-base font-semibold text-[hsl(270_25%_14%)]">CIPF</div>
-                  <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-[hsl(270_8%_42%)]">Iperó · Carteirinha Municipal</div>
+            <div className="mx-auto max-w-[1240px] px-4 py-4 md:px-8">
+              <div className="flex min-h-14 items-center justify-between gap-4">
+                <button type="button" onClick={() => setActiveTab('inicio')} className="min-w-0 text-left">
+                  <div className="min-w-0 text-left leading-tight">
+                    <div className="lovable-display text-base font-semibold text-[hsl(270_25%_14%)]">CIPF</div>
+                    <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-[hsl(270_8%_42%)]">IPERO - CARTEIRINHA MUNICIPAL</div>
+                  </div>
+                </button>
+
+                <nav className="hidden items-center gap-8 text-sm text-[hsl(270_25%_14%/0.70)] lg:flex">
+                  <button type="button" onClick={() => setActiveTab('inicio')} className="transition hover:text-[hsl(270_25%_14%)]">Home</button>
+                  <button type="button" onClick={() => setActiveTab('validar')} className="transition hover:text-[hsl(270_25%_14%)]">Validar</button>
+                </nav>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    onClick={() => setActiveTab('configuracoes')}
+                    className="h-10 rounded-md bg-[hsl(271_52%_32%)] px-3 text-xs font-bold text-white shadow-[0_10px_22px_hsl(271_52%_32%/0.18)] hover:bg-[hsl(271_52%_26%)] sm:px-4 sm:text-sm"
+                  >
+                    Acessar painel
+                  </Button>
                 </div>
-              </button>
-
-              <div className="order-3 xl:order-2">
-                <NavigationTabs
-                  activeTab={activeTab}
-                  currentUser={currentUser}
-                  setActiveTab={setActiveTab}
-                />
               </div>
 
-              <div className="order-2 flex flex-col gap-3 xl:order-3 xl:min-w-0 xl:justify-self-end xl:flex-row xl:items-center xl:justify-end">
-                <Button
-                  type="button"
-                  onClick={() => setActiveTab('configuracoes')}
-                  className="h-10 w-full rounded-md bg-[hsl(271_52%_32%)] px-4 font-bold text-white shadow-[0_16px_32px_hsl(271_52%_32%/0.28)] hover:bg-[hsl(271_52%_26%)] xl:w-auto"
-                >
-                  Acessar painel
-                </Button>
-              </div>
+              <nav className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[hsl(270_15%_92%)] pt-3 text-sm text-[hsl(270_25%_14%/0.72)] lg:hidden">
+                <button type="button" onClick={() => setActiveTab('inicio')} className="transition hover:text-[hsl(270_25%_14%)]">Home</button>
+                <button type="button" onClick={() => setActiveTab('validar')} className="transition hover:text-[hsl(270_25%_14%)]">Validar</button>
+              </nav>
             </div>
           </header>
         )}
@@ -196,7 +252,7 @@ export function AppShell() {
             <div className="mx-auto flex min-h-20 max-w-[1440px] flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8">
               <button type="button" onClick={() => setActiveTab(getDefaultTabForRole(currentUser.role))} className="min-w-0 flex-1 text-left sm:flex-none">
                 <div className="lovable-display text-base font-semibold text-[hsl(270_25%_14%)]">CIPF</div>
-                <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-[hsl(270_8%_42%)]">Iperó · Área interna</div>
+                <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-[hsl(270_8%_42%)]">IPERO - AREA INTERNA</div>
               </button>
 
               <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 sm:justify-between lg:w-auto lg:flex-1 lg:flex-nowrap lg:justify-end">
@@ -231,9 +287,18 @@ export function AppShell() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={logout}
+                  onClick={() => void lockSession()}
                   className="h-10 w-10 rounded-md text-[#6f617b] hover:bg-[#f8f5fb] hover:text-[var(--fibro-purple)]"
-                  title="Sair"
+                  title="Bloquear"
+                >
+                  <LockKeyhole className="h-5 w-5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => void logout()}
+                  className="h-10 w-10 rounded-md text-[#6f617b] hover:bg-[#f8f5fb] hover:text-red-600"
+                  title="Sair definitivo"
                 >
                   <LogOut className="h-5 w-5" />
                 </Button>
@@ -277,8 +342,8 @@ export function AppShell() {
           <footer className="print:hidden mt-auto border-t border-[#ece7f3] bg-white px-4 py-4 text-xs text-[#6f617b]">
             <div className="mx-auto flex max-w-7xl flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <p>© 2026 Prefeitura de Iperó · Secretaria Municipal de Saúde</p>
-                <p className="mt-1 font-medium">{APP_NAME} · Versão {APP_VERSION}</p>
+                <p>(c) 2026 Prefeitura de Ipero - Secretaria Municipal de Saude</p>
+                <p className="mt-1 font-medium">{APP_NAME} - Versao {APP_VERSION}</p>
               </div>
               <nav className="flex flex-wrap items-center gap-5" aria-label="Links institucionais">
                 {[

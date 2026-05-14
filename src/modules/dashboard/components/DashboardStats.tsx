@@ -1,7 +1,7 @@
 import { AlertTriangle, Clock, MessageCircle, PackageCheck, PhoneCall, Printer } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { getDocumentIssues, getNextOperationalAction, maskCpf } from '@/lib/dashboard-utils';
+import { formatCpf, getDocumentIssues, getNextOperationalAction } from '@/lib/dashboard-utils';
 import { getStatusLabel } from '@/lib/registration-status';
 import type { CIPFRegistration } from '@/store/useAppStore';
 import { InfoCard } from './StatusParts';
@@ -74,7 +74,7 @@ export function DashboardStats({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-bold text-[#17324d]">{reg.fullName}</p>
-                      <p className="text-xs text-[#617184]">{maskCpf(reg.cpf)} - {getStatusLabel(reg.status)}</p>
+                      <p className="text-xs text-[#617184]">{formatCpf(reg.cpf)} - {getStatusLabel(reg.status)}</p>
                     </div>
                     <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-black uppercase ${issues.length ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-green-200 bg-green-50 text-green-700'}`}>
                       {issues.length ? `${issues.length} pend.` : 'OK'}

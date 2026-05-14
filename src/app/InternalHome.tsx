@@ -16,11 +16,11 @@ const shortcuts: Shortcut[] = [
   { tab: 'dashboard', title: 'Painel', description: 'Visao geral da operacao.', icon: LayoutDashboard, permission: 'viewDashboard' },
   { tab: 'pessoas', title: 'Consultar cadastros', description: 'Pesquisar, abrir, editar e ver historico.', icon: Users, permission: 'viewPeople' },
   { tab: 'cadastro', title: 'Novo cadastro', description: 'Cadastrar titular e anexos.', icon: ClipboardPlus, permission: 'createRegistration' },
-  { tab: 'operacao', title: 'Aprovar e emitir', description: 'Fila diaria de aprovacao, emissao e segunda via.', icon: ClipboardCheck, permission: 'viewOperations' },
+  { tab: 'operacao', title: 'Aprovar cadastros', description: 'Conferir documentos, aprovar, emitir e registrar segunda via.', icon: ClipboardCheck, permission: 'viewOperations' },
   { tab: 'documentos', title: 'Pendencias', description: 'Fila documental e itens com problema.', icon: FileWarning, permission: 'viewDocumentsQueue' },
   { tab: 'retiradas', title: 'Retiradas', description: 'Controlar entrega presencial.', icon: PackageCheck, permission: 'viewPickupQueue' },
   { tab: 'carteirinha', title: 'Imprimir', description: 'Gerar PNG da carteirinha.', icon: IdCard, permission: 'printCarteirinha' },
-  { tab: 'relatorios', title: 'Relatorios', description: 'CSV, PDF, mensal e backup.', icon: Activity, permission: 'viewReports' },
+  { tab: 'relatorios', title: 'Relatorios', description: 'CSV, PDF e mensal com dados minimizados.', icon: Activity, permission: 'viewReports' },
   { tab: 'auditoria', title: 'Auditoria', description: 'Eventos sensiveis do sistema.', icon: Activity, permission: 'viewAudit' },
   { tab: 'configuracoes', title: 'Configuracoes', description: 'Perfil, sessao e seguranca.', icon: Settings, permission: 'viewSettings' }
 ];
@@ -34,7 +34,7 @@ export function InternalHome() {
       <PageHeader
         eyebrow="Area interna"
         title="Painel operacional"
-        description="Atalhos diretos para cadastro, consulta, emissao, impressao, relatorios e auditoria."
+        description="Atalhos diretos para aprovacao, cadastro, consulta, impressao, relatorios e auditoria."
         tone="purple"
       />
 
@@ -75,7 +75,8 @@ export function InternalHome() {
             <p className="mt-2 text-lg font-black text-[#1c1028]">Cadastrar, consultar, operar, imprimir.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {hasPermission(currentUser, 'createRegistration') && <Button type="button" onClick={() => setActiveTab('cadastro')}>Novo cadastro</Button>}
+            {hasPermission(currentUser, 'viewOperations') && <Button type="button" onClick={() => setActiveTab('operacao')}>Aprovar cadastros</Button>}
+            {hasPermission(currentUser, 'createRegistration') && <Button type="button" variant="outline" onClick={() => setActiveTab('cadastro')}>Novo cadastro</Button>}
             {hasPermission(currentUser, 'viewPeople') && <Button type="button" variant="outline" onClick={() => setActiveTab('pessoas')}>Consultar</Button>}
             {hasPermission(currentUser, 'printCarteirinha') && <Button type="button" variant="outline" onClick={() => setActiveTab('carteirinha')}>Imprimir</Button>}
           </div>

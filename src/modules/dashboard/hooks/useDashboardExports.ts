@@ -1,6 +1,6 @@
 import {
   buildMonthlyReport,
-  maskCpf,
+  formatCpf,
   normalizeForExport,
   type StatusFilter
 } from '@/lib/dashboard-utils';
@@ -21,7 +21,7 @@ export function safeCsvCell(value: unknown): string {
   return `"${formulaSafe.replaceAll('"', '""')}"`;
 }
 
-export function useDashboardExports({ writeAudit, exportDatabase, onError }: ExportOptions) {
+export function useDashboardExports({ writeAudit, exportDatabase: _exportDatabase, onError }: ExportOptions) {
   const useBackendAuthorization = isSecureAdminBackendEnabled();
 
   const run = async (operation: () => Promise<void>) => {
@@ -71,7 +71,7 @@ export function useDashboardExports({ writeAudit, exportDatabase, onError }: Exp
       registrations.slice(0, 32).forEach((reg) => {
         if (y > 280) return;
         doc.text(reg.fullName.slice(0, 48), 10, y);
-        doc.text(maskCpf(reg.cpf), 92, y);
+        doc.text(formatCpf(reg.cpf), 92, y);
         doc.text(getStatusLabel(reg.status), 142, y);
         doc.text(reg.expiryDate || '-', 178, y);
         y += 7;
@@ -121,14 +121,5 @@ export function useDashboardExports({ writeAudit, exportDatabase, onError }: Exp
       }
     });
 
-  const guidedBackup = () =>
-    run(async () => {
-      await authorizeAdminExport('backup_json');
-      await exportDatabase();
-      if (!useBackendAuthorization) {
-        await writeAudit(buildAuditEvent('system.backup_downloaded', { details: 'Copia de seguranca baixada manualmente pelo dashboard' }));
-      }
-    });
-
-  return { exportCsv, exportPdf, exportMonthlyPdf, guidedBackup };
+  return { exportCsv, exportPdf, exportMonthlyPdf };
 }

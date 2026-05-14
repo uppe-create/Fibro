@@ -12,8 +12,11 @@ import {
   Users
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { fetchHomeMetrics, formatMetricValue, HOME_METRICS_FALLBACK } from '@/lib/public-home-metrics';
 import { useAppStore } from '@/store/useAppStore';
 import heroImg from '@/assets/landing-hero.jpg';
+
+const PUBLIC_HOME_SECTION_STORAGE_KEY = 'cipf_public_home_section';
 
 function Reveal({ children, delay = 0 }: { children: ReactNode; delay?: number; key?: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -51,9 +54,36 @@ const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ b
 export function Home() {
   const { setActiveTab } = useAppStore();
   const [mounted, setMounted] = useState(false);
+  const [metrics, setMetrics] = useState(HOME_METRICS_FALLBACK);
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetchHomeMetrics()
+      .then((nextMetrics) => {
+        if (active) setMetrics(nextMetrics);
+      })
+      .catch(() => {
+        if (active) setMetrics(HOME_METRICS_FALLBACK);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const sectionId = sessionStorage.getItem(PUBLIC_HOME_SECTION_STORAGE_KEY);
+    if (!sectionId) return;
+
+    const timeout = window.setTimeout(() => {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      sessionStorage.removeItem(PUBLIC_HOME_SECTION_STORAGE_KEY);
+    }, 120);
+
+    return () => window.clearTimeout(timeout);
   }, []);
 
   const goToLogin = () => setActiveTab('configuracoes');
@@ -124,8 +154,8 @@ export function Home() {
       a: 'Não. O pedido da carteirinha é feito presencialmente. Esta área online é usada pela equipe autorizada da Prefeitura de Iperó para analisar, emitir e validar os registros.'
     },
     {
-      q: 'A validação pública mostra meus dados médicos?',
-      a: 'Não. A validação pública exibe apenas informações mínimas para confirmar a autenticidade da carteirinha, preservando os dados pessoais e médicos.'
+      q: 'Onde eu levo meus documentos para realizar o cadastro?',
+      a: 'Leve os documentos ate a Secretaria Municipal de Saude de Ipero, na Av. Santa Cruz, no 300, Jardim Irene.'
     },
     {
       q: 'A carteirinha tem validade?',
@@ -212,8 +242,8 @@ export function Home() {
 
             <div className={`mt-12 grid grid-cols-1 gap-4 text-sm text-[hsl(270_8%_42%)] transition-all delay-700 duration-1000 sm:mt-16 sm:grid-cols-3 sm:gap-8 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
               {[
-                ['1.284', 'Pessoas atendidas'],
-                ['42', 'Unidades parceiras'],
+                [formatMetricValue(metrics.registrationsTotal), 'Pessoas atendidas'],
+                ['Documento oficial', 'Validacao por QR Code'],
                 ['100%', 'Gratuito e oficial']
               ].map(([value, label], index) => (
                 <div key={label} className={index > 0 ? 'border-t border-[hsl(270_15%_90%)] pt-4 sm:border-l sm:border-t-0 sm:pl-8 sm:pt-0' : ''}>
@@ -250,18 +280,18 @@ export function Home() {
           <Reveal delay={150}>
             <div className="relative">
               <div className="absolute -inset-6 rounded-3xl bg-gradient-to-tr from-[hsl(271_52%_32%/0.20)] to-transparent blur-2xl" />
-              <div className="relative grid grid-cols-2 gap-4">
+              <div className="relative grid grid-cols-1 gap-4 min-[430px]:grid-cols-2">
                 {[
-                  { icon: Users, label: 'Pessoas atendidas', value: '1.284' },
-                  { icon: FileText, label: 'Carteirinhas emitidas', value: '1.107' },
-                  { icon: Hospital, label: 'Unidades parceiras', value: '42' },
+                  { icon: Users, label: 'Pessoas atendidas', value: formatMetricValue(metrics.registrationsTotal) },
+                  { icon: FileText, label: 'Carteirinhas emitidas', value: formatMetricValue(metrics.issuedTotal) },
+                  { icon: QrCode, label: 'Validacao por QR Code', value: 'Documento oficial', compact: true },
                   { icon: ShieldCheck, label: 'Aprovação do programa', value: '98%' }
                 ].map((item) => (
-                  <div key={item.label} className="rounded-2xl border border-[hsl(270_15%_90%)] bg-white p-6 shadow-[0_1px_2px_hsl(270_25%_14%/0.04),0_1px_3px_hsl(270_25%_14%/0.06)] transition-all hover:-translate-y-1">
+                  <div key={item.label} className="rounded-2xl border border-[hsl(270_15%_90%)] bg-white p-5 sm:p-6 shadow-[0_1px_2px_hsl(270_25%_14%/0.04),0_1px_3px_hsl(270_25%_14%/0.06)] transition-all hover:-translate-y-1">
                     <div className="mb-4 grid h-10 w-10 place-items-center rounded-lg bg-[hsl(271_52%_32%/0.10)] text-[hsl(271_52%_32%)]">
                       <item.icon className="h-5 w-5" />
                     </div>
-                    <div className="lovable-display text-3xl font-semibold">{item.value}</div>
+                    <div className={`lovable-display font-semibold text-[hsl(270_25%_14%)] ${item.compact ? 'max-w-[9ch] text-[clamp(1.5rem,3.4vw,2.15rem)] leading-[1.02] text-balance' : 'text-3xl'}`}>{item.value}</div>
                     <div className="mt-1 text-xs text-[hsl(270_8%_42%)]">{item.label}</div>
                   </div>
                 ))}
@@ -326,19 +356,9 @@ export function Home() {
         <div className="relative mx-auto max-w-[1240px] px-4 md:px-8">
           <Reveal>
             <div className="mx-auto max-w-3xl text-center">
-              <div className="lovable-display text-6xl leading-none opacity-30">"</div>
               <p className="lovable-display -mt-6 text-2xl leading-relaxed md:text-3xl">
                 Nosso compromisso é garantir que nenhuma pessoa com fibromialgia seja invisibilizada. O acesso ao atendimento prioritário é um direito.
               </p>
-              <div className="mt-10 flex items-center justify-center gap-4">
-                <div className="grid h-12 w-12 place-items-center rounded-full bg-white/20 font-semibold">
-                  <Sparkles className="h-5 w-5" />
-                </div>
-                <div className="text-left">
-                  <div className="font-medium">Compromisso institucional</div>
-                  <div className="text-sm opacity-80">Programa CIPF</div>
-                </div>
-              </div>
             </div>
           </Reveal>
         </div>
@@ -380,18 +400,6 @@ export function Home() {
                   Sua condição é real. <span className="text-[hsl(271_52%_32%)]">Seu direito também.</span>
                 </h2>
                 <p className="mx-auto mt-6 max-w-xl text-lg text-[hsl(270_8%_42%)]">Procure a Secretaria Municipal de Saúde de Iperó e solicite sua Carteirinha de Identificação da Pessoa com Fibromialgia.</p>
-                <div className="mx-auto mt-8 grid max-w-4xl gap-3 text-left md:grid-cols-2">
-                  <div className="rounded-2xl border border-[hsl(270_15%_90%)] bg-[hsl(30_25%_98%)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(271_52%_32%)]">Atendimento presencial</p>
-                    <p className="mt-2 text-sm leading-6 text-[hsl(270_8%_42%)]">Av. Santa Cruz, nº 300, Jardim Irene</p>
-                    <p className="text-sm leading-6 text-[hsl(270_8%_42%)]">Segunda à Sexta-Feira, das 8 às 16 horas</p>
-                  </div>
-                  <div className="rounded-2xl border border-[hsl(270_15%_90%)] bg-[hsl(30_25%_98%)] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[hsl(271_52%_32%)]">Contato da Saúde</p>
-                    <p className="mt-2 text-sm leading-6 text-[hsl(270_8%_42%)]">Telefone: 15 3266-2137</p>
-                    <p className="text-sm leading-6 text-[hsl(270_8%_42%)]">E-mail: saude@ipero.sp.gov.br</p>
-                  </div>
-                </div>
                 <div className="mt-10 flex flex-wrap justify-center gap-4">
                   <Button type="button" size="lg" onClick={() => scrollTo('como-funciona')} className="h-12 rounded-md px-8 text-base">
                     Ver como solicitar <ArrowRight className="h-4 w-4" />

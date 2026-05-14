@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BadgeCheck, Clock, KeyRound, Loader2, ShieldCheck, Smartphone, UserCog } from 'lucide-react';
+import { BadgeCheck, Clock, KeyRound, Loader2, LockKeyhole, LogOut, ShieldCheck, Smartphone, UserCog } from 'lucide-react';
 import { getSessionSecurityConfig, useAppStore, type AppUser } from '@/store/useAppStore';
 import { getRoleLabel, hasPermission, type Permission, type UserRole } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
@@ -69,7 +69,7 @@ const INITIAL_MFA_PANEL_STATE: MfaPanelState = {
 };
 
 export function Configuracoes() {
-  const { currentUser, setCurrentUser, logAudit, logout, refreshCurrentUser } = useAppStore();
+  const { currentUser, setCurrentUser, logAudit, lockSession, logout, refreshCurrentUser } = useAppStore();
   const { idleTimeoutMs, maxSessionMs, loginMaxAttempts, lockoutMinutes } = getSessionSecurityConfig();
   const idleMinutes = Math.round(idleTimeoutMs / 60000);
   const maxHours = Math.round(maxSessionMs / 3600000);
@@ -307,7 +307,7 @@ export function Configuracoes() {
             <div>
               <h3 className="text-lg font-black text-[#17324d]">MFA do administrador</h3>
               <p className="text-sm text-[#617184]">
-                Ative TOTP no aplicativo autenticador para liberar o perfil administrador com `aal2`.
+                Ative TOTP para liberar o perfil administrador com `aal2`. O código pode ficar em autenticador no celular ou em cofre institucional no computador, como 1Password, Bitwarden, Authy Desktop ou Apple Senhas.
               </p>
             </div>
           </div>
@@ -351,7 +351,7 @@ export function Configuracoes() {
               {mfaPanel.verifiedTotpCount === 0 && !mfaPanel.enrollFactorId ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                   <p className="text-sm font-semibold text-amber-900">
-                    Sem TOTP ativo. Gere um QR code e cadastre no Google Authenticator, Microsoft Authenticator ou similar.
+                    Sem TOTP ativo. Gere um QR code e cadastre em autenticador ou cofre institucional autorizado, não apenas em celular pessoal.
                   </p>
                   <Button type="button" onClick={() => void startMfaEnrollment()} className="mt-4" disabled={mfaPanel.busy}>
                     {mfaPanel.busy ? 'Gerando QR...' : 'Ativar MFA para liberar perfil administrador'}
@@ -363,6 +363,9 @@ export function Configuracoes() {
                 <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
                   <div className="rounded-xl border border-[#e3e9ef] bg-white p-4">
                     <p className="text-sm font-black text-[#17324d]">Escaneie o QR code</p>
+                    <p className="mt-2 text-sm text-[#617184]">
+                      Use aplicativo autenticador ou gerenciador de senhas com TOTP no computador.
+                    </p>
                     <div className="mt-4 flex items-center justify-center rounded-xl border border-[#ece7f3] bg-[#faf7fd] p-4">
                       <img src={mfaPanel.enrollQr} alt="QR code MFA" className="h-56 w-56" />
                     </div>
@@ -371,11 +374,14 @@ export function Configuracoes() {
                   <div className="rounded-xl border border-[#e3e9ef] bg-[#f8fafc] p-4">
                     <p className="text-sm font-black text-[#17324d]">Confirme o código</p>
                     <p className="mt-2 text-sm text-[#617184]">
-                      Se não conseguir ler o QR, use a chave manual abaixo no autenticador.
+                      Se não conseguir ler o QR, use a chave manual abaixo no autenticador. Guarde esta chave somente em cofre institucional autorizado.
                     </p>
-                    <div className="mt-4 rounded-lg border border-[#e3e9ef] bg-white p-3">
+                    <div className="mt-4 rounded-lg border-2 border-amber-200 bg-amber-50 p-3">
                       <p className="text-xs font-black uppercase tracking-wide text-[#7d6c8c]">Chave manual</p>
                       <p className="mt-2 break-all font-mono text-sm text-[#17324d]">{mfaPanel.enrollSecret}</p>
+                      <p className="mt-2 text-xs font-semibold text-amber-900">
+                        Trate como senha. Não envie por WhatsApp, e-mail ou canal não autorizado.
+                      </p>
                     </div>
                     <div className="mt-4">
                       <label htmlFor="mfa-enroll-code" className="mb-2 block text-sm font-bold text-[#170b24]">
@@ -410,7 +416,7 @@ export function Configuracoes() {
               {mfaPanel.verifiedTotpCount > 0 && currentUser?.role === 'viewer' ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                   <p className="text-sm font-semibold text-amber-900">
-                    TOTP já existe, mas esta sessão ainda não validou o segundo fator.
+                    TOTP já existe, mas esta sessão ainda não validou o segundo fator. Consulte o autenticador ou cofre institucional autorizado.
                   </p>
                   <div className="mt-4">
                     <label htmlFor="mfa-login-code" className="mb-2 block text-sm font-bold text-[#170b24]">
@@ -430,7 +436,7 @@ export function Configuracoes() {
                       {mfaPanel.busy ? 'Validando...' : 'Liberar perfil administrador'}
                     </Button>
                     <Button type="button" variant="outline" onClick={() => void logout()} disabled={mfaPanel.busy}>
-                      Sair
+                      Sair definitivo
                     </Button>
                   </div>
                 </div>
@@ -487,7 +493,29 @@ export function Configuracoes() {
           </ol>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button type="button" onClick={() => void logout()}>
-              Sair para relogar com MFA
+              <LogOut className="mr-2 h-4 w-4" />
+              Sair definitivo para relogar com MFA
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {currentUser ? (
+        <div className="cipf-panel p-6">
+          <div className="mb-4">
+            <h3 className="text-lg font-black text-[#17324d]">Sessao</h3>
+            <p className="text-sm text-[#617184]">
+              Bloquear preserva sessao Supabase e evita novo MFA enquanto `aal2` continuar valido. Prefira bloquear tela no dia a dia e use sair definitivo só quando precisar encerrar a sessão.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={() => void lockSession()}>
+              <LockKeyhole className="mr-2 h-4 w-4" />
+              Bloquear tela
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void logout()}>
+              <LogOut className="mr-2 h-4 w-4" />
+              Sair definitivo
             </Button>
           </div>
         </div>

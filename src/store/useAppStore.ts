@@ -10,6 +10,7 @@ import { getAuthMode, getProductionAuthError } from '@/lib/auth-mode';
 const LOCAL_AUTH_STORAGE_KEY = 'cipf_local_auth';
 const LOGIN_ATTEMPTS_STORAGE_KEY = 'cipf_login_attempts';
 const LOGIN_LOCK_UNTIL_STORAGE_KEY = 'cipf_login_lock_until';
+const SESSION_LOCKED_STORAGE_KEY = 'cipf_session_locked';
 
 export const SESSION_ACTIVITY_STORAGE_KEY = 'cipf_last_activity';
 export const SESSION_LOGIN_AT_STORAGE_KEY = 'cipf_login_at';
@@ -95,6 +96,7 @@ export type CIPFRegistration = {
 type AppState = {
   isAuthReady: boolean;
   currentUser: AppUser | null;
+  isSessionLocked: boolean;
   mfaChallenge: MfaChallengeState;
   registrations: CIPFRegistration[];
   lastBackupDate: number | null;
@@ -107,6 +109,8 @@ type AppState = {
   cancelMfaChallenge: () => Promise<void>;
   clearMfaChallengeError: () => void;
   refreshCurrentUser: () => Promise<void>;
+  lockSession: () => Promise<void>;
+  unlockSession: () => Promise<void>;
   logout: () => Promise<void>;
   logAudit: (action: string, reason?: string, registrationId?: string) => Promise<void>;
   fetchRegistrations: () => Promise<void>;
@@ -122,8 +126,8 @@ const asInt = (value: unknown, fallback: number, min: number, max: number): numb
 
 export function getSessionSecurityConfig() {
   const env = (import.meta as any).env || {};
-  const idleTimeoutMinutes = asInt(env.VITE_SESSION_IDLE_TIMEOUT_MINUTES, 20, 5, 240);
-  const maxSessionHours = asInt(env.VITE_SESSION_MAX_DURATION_HOURS, 12, 1, 72);
+  const idleTimeoutMinutes = asInt(env.VITE_SESSION_IDLE_TIMEOUT_MINUTES, 120, 5, 240);
+  const maxSessionHours = asInt(env.VITE_SESSION_MAX_DURATION_HOURS, 24, 1, 72);
   const loginMaxAttempts = asInt(env.VITE_LOGIN_MAX_ATTEMPTS, 5, 3, 10);
   const lockoutMinutes = asInt(env.VITE_LOGIN_LOCKOUT_MINUTES, 15, 1, 120);
 
@@ -266,6 +270,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     getAuthMode((import.meta as any).env || {}) === 'supabase'
       ? null
       : getLocalUserSession(),
+  isSessionLocked: localStorage.getItem(SESSION_LOCKED_STORAGE_KEY) === '1',
   mfaChallenge: EMPTY_MFA_CHALLENGE,
   registrations: [],
   lastBackupDate: parseInt(localStorage.getItem('lastBackupDate') || '0', 10) || null,
@@ -304,10 +309,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(user));
       localStorage.setItem(SESSION_LOGIN_AT_STORAGE_KEY, String(Date.now()));
       localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
+      localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
     } else {
       sessionStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
     }
-    set({ currentUser: user });
+    set({ currentUser: user, isSessionLocked: false });
   },
   initializeAuth: async () => {
     const env = (import.meta as any).env || {};
@@ -394,7 +400,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(authUser));
       localStorage.setItem(SESSION_LOGIN_AT_STORAGE_KEY, String(Date.now()));
       localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
-      set({ currentUser: authUser, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
+      localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
+      set({ currentUser: authUser, isSessionLocked: false, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
 
       await logAuditEvent(buildAuditEvent('auth.login.supabase', { userId: authUser.id, userName: authUser.name, details: `Perfil ${authUser.role}` }));
       return;
@@ -447,7 +454,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(localUser));
     localStorage.setItem(SESSION_LOGIN_AT_STORAGE_KEY, String(Date.now()));
     localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
-    set({ currentUser: localUser, isAuthReady: true });
+    localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
+    set({ currentUser: localUser, isSessionLocked: false, isAuthReady: true });
 
     await logAuditEvent(buildAuditEvent('auth.login.local', { userId: localUser.id, userName: localUser.name, details: 'Acesso autorizado' }));
   },
@@ -489,7 +497,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(authUser));
     localStorage.setItem(SESSION_LOGIN_AT_STORAGE_KEY, String(Date.now()));
     localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
-    set({ currentUser: authUser, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
+    localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
+    set({ currentUser: authUser, isSessionLocked: false, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
   },
   cancelMfaChallenge: async () => {
     try {
@@ -501,7 +510,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
     localStorage.removeItem(SESSION_LOGIN_AT_STORAGE_KEY);
     localStorage.removeItem(SESSION_ACTIVITY_STORAGE_KEY);
-    set({ currentUser: null, mfaChallenge: EMPTY_MFA_CHALLENGE });
+    localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
+    set({ currentUser: null, isSessionLocked: false, mfaChallenge: EMPTY_MFA_CHALLENGE });
   },
   clearMfaChallengeError: () => {
     set((state) => ({
@@ -538,6 +548,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(authUser));
     set({ currentUser: authUser, mfaChallenge: EMPTY_MFA_CHALLENGE });
   },
+  lockSession: async () => {
+    const user = get().currentUser;
+    if (!user) return;
+    localStorage.setItem(SESSION_LOCKED_STORAGE_KEY, '1');
+    set({ isSessionLocked: true, registrations: [] });
+    try {
+      await logAuditEvent(buildAuditEvent('auth.session_locked', { userId: user.id, userName: user.name, details: 'Bloqueio local de tela' }));
+    } catch {
+      // Local lock must work even when audit RPC is temporarily unavailable.
+    }
+  },
+  unlockSession: async () => {
+    await get().refreshCurrentUser();
+    if (get().mfaChallenge.required) return;
+    if (!get().currentUser) throw new Error('Sessao expirada. Entre novamente.');
+    localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
+    localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
+    set({ isSessionLocked: false });
+  },
   logout: async () => {
     const env = (import.meta as any).env || {};
     const user = get().currentUser;
@@ -551,34 +580,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
     localStorage.removeItem(SESSION_LOGIN_AT_STORAGE_KEY);
     localStorage.removeItem(SESSION_ACTIVITY_STORAGE_KEY);
-    set({ currentUser: null, registrations: [], mfaChallenge: EMPTY_MFA_CHALLENGE });
+    localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
+    set({ currentUser: null, isSessionLocked: false, registrations: [], mfaChallenge: EMPTY_MFA_CHALLENGE });
 
     await logAuditEvent(buildAuditEvent('auth.logout', { userId: user?.id || null, userName: user?.name || 'Sistema', details: 'Encerramento de sessao' }));
   },
   exportDatabase: async () => {
-    const { registrations, fetchRegistrations } = get();
-    let dataToExport = registrations;
-    if (dataToExport.length === 0) {
-      await fetchRegistrations();
-      dataToExport = get().registrations;
-    }
-
-    const dataStr = JSON.stringify(dataToExport, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
-    const linkElement = document.createElement('a');
-    linkElement.setAttribute('href', url);
-    linkElement.setAttribute('download', `backup_cipf_${new Date().toISOString().split('T')[0]}.json`);
-    document.body.appendChild(linkElement);
-    linkElement.click();
-    document.body.removeChild(linkElement);
-    URL.revokeObjectURL(url);
-
-    const now = Date.now();
-    localStorage.setItem('lastBackupDate', now.toString());
-    set({ lastBackupDate: now });
-    await logAuditEvent(buildAuditEvent('system.backup_downloaded', { userId: get().currentUser?.id || null, userName: get().currentUser?.name || 'Sistema', details: 'Backup JSON exportado' }));
+    throw new Error('Backup integral desabilitado por protecao LGPD. Use apenas CSV ou PDF minimizado.');
   },
   clearDatabase: async () => {
     const { currentUser } = get();

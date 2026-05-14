@@ -3,11 +3,12 @@ import { RefreshCw, Search, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PageHeader } from '@/components/ui/layout';
-import { getDocumentIssues, maskCpf, toDigits } from '@/lib/dashboard-utils';
+import { formatCpf, getDocumentIssues, toDigits } from '@/lib/dashboard-utils';
 import { getStatusLabel } from '@/lib/registration-status';
 import { useAppStore, type CIPFRegistration } from '@/store/useAppStore';
 
 const PEOPLE_SEARCH_STORAGE_KEY = 'cipf_people_search';
+const FOCUS_REGISTRATION_STORAGE_KEY = 'cipf_focus_registration_id';
 
 export function Documentos() {
   const { registrations, fetchRegistrations, setActiveTab } = useAppStore();
@@ -30,6 +31,22 @@ export function Documentos() {
   useEffect(() => {
     void loadData();
   }, []);
+
+  useEffect(() => {
+    const externalSearch = sessionStorage.getItem(PEOPLE_SEARCH_STORAGE_KEY);
+    const focusId = sessionStorage.getItem(FOCUS_REGISTRATION_STORAGE_KEY);
+    if (externalSearch) {
+      setSearchTerm(externalSearch);
+      sessionStorage.removeItem(PEOPLE_SEARCH_STORAGE_KEY);
+      sessionStorage.removeItem(FOCUS_REGISTRATION_STORAGE_KEY);
+      return;
+    }
+    if (!focusId || registrations.length === 0) return;
+    const focused = registrations.find((reg) => reg.id === focusId);
+    if (!focused) return;
+    setSearchTerm(toDigits(focused.cpf) || focused.fullName);
+    sessionStorage.removeItem(FOCUS_REGISTRATION_STORAGE_KEY);
+  }, [registrations]);
 
   const documentQueue = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -83,7 +100,7 @@ export function Documentos() {
                     <p className="truncate text-base font-semibold text-[var(--brand-ink)]">{registration.fullName}</p>
                     <span className="rounded-full border border-amber-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-amber-800">{issues.length} pendência(s)</span>
                   </div>
-                  <p className="mt-1 text-xs text-[#617184]">{maskCpf(registration.cpf)} • {getStatusLabel(registration.status)} • {registration.bairro || 'Bairro não informado'}</p>
+                  <p className="mt-1 text-xs text-[#617184]">{formatCpf(registration.cpf)} • {getStatusLabel(registration.status)} • {registration.bairro || 'Bairro não informado'}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {issues.map((issue) => (
                       <span key={issue} className="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-semibold text-amber-900">

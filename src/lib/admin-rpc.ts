@@ -2,7 +2,7 @@ import { getAuthMode } from '@/lib/auth-mode';
 import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 
 export type AdminWorkflowAction = 'approve' | 'issue' | 'cancel' | 'renew' | 'reissue' | 'archive';
-export type AdminExportKind = 'dashboard_csv' | 'dashboard_pdf' | 'monthly_pdf' | 'backup_json';
+export type AdminExportKind = 'dashboard_csv' | 'dashboard_pdf' | 'monthly_pdf';
 
 const env = (import.meta as any).env || {};
 

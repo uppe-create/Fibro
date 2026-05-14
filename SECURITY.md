@@ -15,6 +15,8 @@ Este projeto trabalha com dados pessoais e dados potencialmente sensiveis de sau
 - Auditoria usa RPC `log_audit_event`; frontend nao insere direto em `audit_logs`.
 - MFA TOTP para admin ja existe no app: enroll, verify e challenge.
 - Em `auth_mode=supabase`, aprovar, emitir, cancelar, renovar, arquivar e autorizar exportacao passam por RPC segura.
+- Backup JSON integral no navegador foi desativado por protecao LGPD.
+- Home publica usa apenas metricas agregadas por RPC.
 
 ## Melhorias Ja Aplicadas
 
@@ -41,6 +43,7 @@ Este projeto trabalha com dados pessoais e dados potencialmente sensiveis de sau
 - CSP foi endurecida sem `unsafe-inline`.
 - CSV exportado protege contra CSV Injection.
 - Uploads validam tamanho, MIME, extensao e magic bytes.
+- Politica de privacidade e termos foram reescritos para evitar claim sem implementacao comprovada no repo.
 
 ## Arquivos de Seguranca e Banco
 
@@ -82,8 +85,9 @@ Nunca coloque estes itens em `VITE_*`, README, SECURITY, AI_HANDOFF ou codigo ve
 
 - IP auditado por RPC depende dos headers repassados pelo Supabase.
 - Em modo local, MVP ainda usa fallback frontend para nao quebrar testes controlados.
-- Exportacao ainda gera arquivo no navegador; Edge Function continua opcao futura para arquivo assinado/backend-only.
+- Exportacao ainda gera CSV/PDF no navegador; Edge Function continua opcao futura para arquivo assinado/backend-only.
 - Login local deve continuar proibido em producao.
+- Historico remoto de migrations pode ficar desalinhado com `supabase db push`; aplicar migration incremental no SQL Editor quando necessario.
 
 ## Regras de Ouro para Futuras Alteracoes
 
@@ -93,3 +97,4 @@ Nunca coloque estes itens em `VITE_*`, README, SECURITY, AI_HANDOFF ou codigo ve
 - Nunca aplicar RLS restritiva no banco vivo sem rodar smoke tests por perfil.
 - Sempre registrar auditoria via RPC para acao sensivel.
 - Sempre validar build e permissao antes de publicar.
+- Sempre manter `docs/lgpd/` coerente com o fluxo real do sistema.

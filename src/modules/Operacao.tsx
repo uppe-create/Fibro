@@ -3,6 +3,7 @@ import { CalendarClock, Download, FileDown, Minimize2, RefreshCw, Trash2 } from 
 import { buildAuditEvent, getAuditHistoryFilterKey, type AuditEntryRow } from '@/lib/audit-events';
 import { normalizeAuditEntries } from '@/lib/audit-history';
 import { supabase } from '@/lib/supabase';
+import { loadCipfFileDataUri, openInNewTab } from '@/lib/cipf-files';
 import { hasPermission } from '@/lib/permissions';
 import { buildEditForm, buildSafeRegistrationSummary, buildWhatsAppMessage, normalizeUpper, toDigits, type EditRegistrationForm } from '@/lib/dashboard-utils';
 import { useAppStore, type CIPFRegistration } from '@/store/useAppStore';
@@ -17,6 +18,8 @@ import { useRegistrationWorkflow } from './dashboard/hooks/useRegistrationWorkfl
 import type { ConfirmActionConfig, DashboardModalState } from './dashboard/lib/types';
 
 const PRINT_REGISTRATION_STORAGE_KEY = 'cipf_print_registration_id';
+const FOCUS_REGISTRATION_STORAGE_KEY = 'cipf_focus_registration_id';
+type DocumentFileKind = 'document' | 'proof' | 'medical' | 'photo';
 
 const initialModalState: DashboardModalState = {
   detailReg: null,
@@ -81,6 +84,15 @@ export function Operacao() {
   useEffect(() => {
     void loadData();
   }, []);
+
+  useEffect(() => {
+    const focusId = sessionStorage.getItem(FOCUS_REGISTRATION_STORAGE_KEY);
+    if (!focusId || modal.detailReg || registrations.length === 0) return;
+    const focused = registrations.find((reg) => reg.id === focusId);
+    if (!focused) return;
+    sessionStorage.removeItem(FOCUS_REGISTRATION_STORAGE_KEY);
+    setModal({ detailReg: focused });
+  }, [modal.detailReg, registrations]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -174,6 +186,24 @@ export function Operacao() {
     setModal({ detailReg: null, history: { fullName: reg.fullName, entries: normalizeAuditEntries((data || []) as AuditEntryRow[]) } });
   };
 
+  const openDocumentFile = async (reg: CIPFRegistration, kind: DocumentFileKind) => {
+    if (!permissions.canViewDocuments) return;
+    const fileMap = {
+      document: { id: reg.documentFileId, fallback: reg.documentUrl || '', label: 'Documento oficial' },
+      proof: { id: reg.proofOfResidenceFileId, fallback: reg.proofOfResidenceUrl || '', label: 'Comprovante de residencia' },
+      medical: { id: reg.medicalReportFileId, fallback: reg.medicalReportUrl || '', label: 'Laudo medico' },
+      photo: { id: reg.photoFileId, fallback: reg.photoUrl || '', label: 'Foto' }
+    };
+    const file = fileMap[kind];
+    const uri = await loadCipfFileDataUri(file.id, file.fallback);
+    if (!uri) {
+      setMessage('Arquivo nao encontrado.');
+      return;
+    }
+    openInNewTab(uri);
+    await workflow.writeAudit(buildAuditEvent('document.sensitive_viewed', { registrationId: reg.id, targetLabel: reg.fullName, details: file.label }));
+  };
+
   const requestWorkflow = (action: 'approve' | 'issue' | 'cancel' | 'renew' | 'reissue', reg: CIPFRegistration) => {
     const configByAction: Record<typeof action, ConfirmActionConfig> = {
       approve: { title: 'Aprovar cadastro', description: `Aprovar ${reg.fullName}?`, confirmLabel: 'Aprovar', tone: 'success', onConfirm: () => workflow.approve(reg) },
@@ -218,7 +248,7 @@ export function Operacao() {
 
   const copySummary = async (reg: CIPFRegistration) => {
     await navigator.clipboard.writeText(buildSafeRegistrationSummary(reg));
-    await workflow.writeAudit(buildAuditEvent('export.summary_copied', { registrationId: reg.id, targetLabel: reg.fullName, details: 'Resumo com CPF mascarado e sem dados medicos sensiveis' }));
+    await workflow.writeAudit(buildAuditEvent('export.summary_copied', { registrationId: reg.id, targetLabel: reg.fullName, details: 'Resumo com CPF completo e sem dados medicos sensiveis' }));
   };
 
   const batchPrint = () => {
@@ -236,12 +266,12 @@ export function Operacao() {
       <Header />
       <div className="flex flex-col justify-between gap-8 xl:flex-row xl:items-center">
         <div>
-          <h3 className="cipf-title text-xl">Ações operacionais</h3>
-          <p className="cipf-description mt-1 text-sm">Administre aprovações, avisos, emissões, retiradas e auditorias sensíveis.</p>
+          <h3 className="cipf-title text-xl">Aprovar cadastros</h3>
+          <p className="cipf-description mt-1 text-sm">Confira documentos, aprove cadastros, avise pacientes, emita carteirinhas e registre retiradas.</p>
         </div>
         <ActionGrid>
           {permissions.canClearDatabase && <ActionButton tone="danger" onClick={() => setModal({ confirmAction: { title: 'Arquivar base', description: 'Digite ARQUIVAR TUDO para confirmar. Registros ativos serão ocultados sem exclusão física.', confirmLabel: 'Arquivar', tone: 'danger', requiredText: 'ARQUIVAR TUDO', onConfirm: async () => { await clearDatabase(); await loadData(); } } })}><Trash2 className="mr-2 h-4 w-4" />Arquivar</ActionButton>}
-          {permissions.canExportDashboard && <><ActionButton onClick={() => exports.exportCsv(registrations)}><FileDown className="mr-2 h-4 w-4" />CSV</ActionButton><ActionButton onClick={() => exports.exportPdf(registrations, dashboard.filters)}><Download className="mr-2 h-4 w-4" />PDF</ActionButton><ActionButton onClick={() => exports.exportMonthlyPdf(registrations)}><CalendarClock className="mr-2 h-4 w-4" />Mensal</ActionButton><ActionButton onClick={() => setModal({ confirmAction: { title: 'Baixar backup', description: 'A cópia pode conter dados sensíveis. Confirme apenas em computador autorizado.', confirmLabel: 'Baixar', onConfirm: exports.guidedBackup } })}><Download className="mr-2 h-4 w-4" />Backup</ActionButton></>}
+          {permissions.canExportDashboard && <><ActionButton onClick={() => exports.exportCsv(registrations)}><FileDown className="mr-2 h-4 w-4" />CSV</ActionButton><ActionButton onClick={() => exports.exportPdf(registrations, dashboard.filters)}><Download className="mr-2 h-4 w-4" />PDF</ActionButton><ActionButton onClick={() => exports.exportMonthlyPdf(registrations)}><CalendarClock className="mr-2 h-4 w-4" />Mensal</ActionButton></>}
           <ActionButton onClick={dashboard.filterActions.toggleCompactMode}><Minimize2 className="mr-2 h-4 w-4" />{dashboard.filters.isCompactMode ? 'Confortável' : 'Compacto'}</ActionButton>
           <ActionButton onClick={loadData}><RefreshCw className="mr-2 h-4 w-4" />Atualizar</ActionButton>
         </ActionGrid>
@@ -249,7 +279,7 @@ export function Operacao() {
       {(loadError || message) && <div className="cipf-subpanel border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{loadError || message}</div>}
       <DashboardStats stats={dashboard.stats} todayActions={dashboard.todayActions} quickSearchTerm={dashboard.filters.quickSearchTerm} onQuickSearchChange={dashboard.filterActions.setQuickSearchTerm} quickResults={dashboard.quickResults} onOpenDetails={(reg) => setModal({ detailReg: reg })} onCopySummary={copySummary} />
       <DashboardQueues operationalQueue={dashboard.operationalQueue} documentIssueQueue={dashboard.documentIssueQueue} batchPrintableRegistrations={dashboard.batchPrintableRegistrations} selectedBatchIds={selectedBatchIds} setSelectedBatchIds={setSelectedBatchIds} permissions={{ ...permissions, canRegisterPatientContact, canRegisterPickup }} onOpenDetails={(reg) => setModal({ detailReg: reg })} onResolveIssue={(reg) => openEdit(reg)} onApprove={(reg) => requestWorkflow('approve', reg)} onIssue={(reg) => requestWorkflow('issue', reg)} onNotify={(reg, template) => setModal({ whatsAppDraft: { reg, template, message: buildWhatsAppMessage(reg, template) } })} onRegisterNotice={(reg) => workflow.notifyPatient(reg, 'Aviso registrado manualmente')} onPickup={(reg) => setModal({ pickupDraft: { reg, pickedBy: '', documentChecked: false, note: '' } })} onBatchPrint={batchPrint} showDocumentIssues={false} />
-      <DashboardModals modal={modal} setModal={setModal} editForm={editForm} updateEditField={updateEditField} saveEdit={saveEdit} isSavingEdit={isSavingEdit} historyFilter={historyFilter} setHistoryFilter={setHistoryFilter} filteredHistoryEntries={filteredHistoryEntries} internalNote={internalNote} setInternalNote={setInternalNote} onAddInternalNote={() => modal.detailReg && workflow.addInternalNote(modal.detailReg, internalNote).then(() => setInternalNote(''))} onCopySummary={copySummary} onResolveIssue={openEdit} onWorkflow={requestWorkflow} onOpenHistory={openHistory} onConfirmWhatsApp={confirmWhatsApp} onConfirmPickup={confirmPickup} onConfirmAction={confirmAction} onPreviewPrint={(reg) => requestWorkflow('issue', reg)} previewPhotoUri={previewPhotoUri} isPreviewLoading={isPreviewLoading} permissions={permissions} />
+      <DashboardModals modal={modal} setModal={setModal} editForm={editForm} updateEditField={updateEditField} saveEdit={saveEdit} isSavingEdit={isSavingEdit} historyFilter={historyFilter} setHistoryFilter={setHistoryFilter} filteredHistoryEntries={filteredHistoryEntries} internalNote={internalNote} setInternalNote={setInternalNote} onAddInternalNote={() => modal.detailReg && workflow.addInternalNote(modal.detailReg, internalNote).then(() => setInternalNote(''))} onCopySummary={copySummary} onResolveIssue={openEdit} onWorkflow={requestWorkflow} onOpenHistory={openHistory} onOpenDocumentFile={openDocumentFile} onConfirmWhatsApp={confirmWhatsApp} onConfirmPickup={confirmPickup} onConfirmAction={confirmAction} onPreviewPrint={(reg) => requestWorkflow('issue', reg)} previewPhotoUri={previewPhotoUri} isPreviewLoading={isPreviewLoading} permissions={permissions} />
     </div>
   );
 }

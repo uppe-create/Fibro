@@ -2,7 +2,7 @@ import { daysUntil, parseBRDate } from '@/lib/date';
 import { getDocumentIssues } from '@/lib/dashboard-utils';
 import { normalizeRegistrationStatus } from '@/lib/registration-status';
 import type { AppUser, CIPFRegistration } from '@/store/useAppStore';
-import { getApprovalWhatsAppUrl, maskCpf, onlyDigits } from './notification-utils';
+import { formatCpf, getApprovalWhatsAppUrl, onlyDigits } from './notification-utils';
 
 export type NotificationTone = 'blue' | 'red' | 'amber' | 'orange' | 'green' | 'purple' | 'slate' | 'zinc';
 export type NotificationIconKey =
@@ -17,8 +17,8 @@ export type NotificationIconKey =
   | 'clock';
 
 export type NotificationAction =
-  | { kind: 'backup'; label: string }
-  | { kind: 'link'; label: string; href: string };
+  | { kind: 'link'; label: string; href: string }
+  | { kind: 'navigate'; label: string; tab: string; registrationId?: string; search?: string };
 
 export type NotificationEntry = {
   id: string;
@@ -62,10 +62,17 @@ const buildRegEntry = (registration: CIPFRegistration, subtitle: string, action?
   action
 });
 
+const openRegistrationAction = (registration: CIPFRegistration, label: string, tab = 'operacao'): NotificationAction => ({
+  kind: 'navigate',
+  label,
+  tab,
+  registrationId: registration.id,
+  search: onlyDigits(registration.cpf) || registration.fullName
+});
+
 export function buildNotificationSections({
   registrations,
-  currentUser,
-  lastBackupDate
+  currentUser
 }: BuildNotificationSectionsParams): { sections: NotificationSection[]; unreadCount: number } {
   const canHandleOperationalAlerts = currentUser?.role === 'admin' || currentUser?.role === 'attendant';
   const pendingApprovalRegistrations = canHandleOperationalAlerts ? byStatus(registrations, 'under_review').slice(0, 8) : [];
@@ -102,28 +109,15 @@ export function buildNotificationSections({
     .sort(sortByExpiryDateAsc);
 
   const queueIsHigh = pendingApprovalRegistrations.length >= 5;
-  const needsBackup = currentUser?.role === 'admin' && (!lastBackupDate || Date.now() - lastBackupDate > 7 * 24 * 60 * 60 * 1000);
-
   const sections: NotificationSection[] = [];
-
-  if (needsBackup) {
-    sections.push({
-      id: 'backup-needed',
-      tone: 'blue',
-      icon: 'database',
-      title: 'Backup necessário',
-      description: 'Já faz mais de 7 dias desde o último backup do sistema.',
-      action: { kind: 'backup', label: 'Fazer Backup Agora' }
-    });
-  }
 
   if (queueIsHigh) {
     sections.push({
       id: 'queue-high',
       tone: 'red',
       icon: 'alert',
-      title: 'Fila de análise alta',
-      description: `Existem ${pendingApprovalRegistrations.length} cadastros aguardando conferência. Vale priorizar a triagem.`
+      title: 'Fila de analise alta',
+      description: `Existem ${pendingApprovalRegistrations.length} cadastros aguardando conferencia. Vale priorizar a triagem.`
     });
   }
 
@@ -132,10 +126,10 @@ export function buildNotificationSections({
       id: 'pending-approval',
       tone: 'amber',
       icon: 'clipboard-check',
-      title: 'Carteirinhas aguardando aprovação',
-      description: `${pendingApprovalRegistrations.length} cadastro(s) em análise precisam de conferência.`,
+      title: 'Carteirinhas aguardando aprovacao',
+      description: `${pendingApprovalRegistrations.length} cadastro(s) em analise precisam de conferencia.`,
       entries: pendingApprovalRegistrations.slice(0, 4).map((registration) =>
-        buildRegEntry(registration, `CPF: ${maskCpf(registration.cpf)}`)
+        buildRegEntry(registration, `CPF: ${formatCpf(registration.cpf)}`, openRegistrationAction(registration, 'Abrir aprovacao'))
       )
     });
   }
@@ -145,10 +139,10 @@ export function buildNotificationSections({
       id: 'document-issues',
       tone: 'orange',
       icon: 'file-warning',
-      title: 'Pendências documentais',
+      title: 'Pendencias documentais',
       description: 'Revise laudo, foto, documento ou comprovante antes de aprovar.',
       entries: documentIssueRegistrations.slice(0, 3).map((registration) =>
-        buildRegEntry(registration, getDocumentIssues(registration).slice(0, 2).join(' • '))
+        buildRegEntry(registration, getDocumentIssues(registration).slice(0, 2).join(' - '), openRegistrationAction(registration, 'Resolver pendencia', 'documentos'))
       )
     });
   }
@@ -158,10 +152,10 @@ export function buildNotificationSections({
       id: 'approved-ready-to-issue',
       tone: 'green',
       icon: 'printer',
-      title: 'Prontas para emissão',
-      description: 'Carteirinhas aprovadas e sem pendência documental para o administrador emitir.',
+      title: 'Prontas para emissao',
+      description: 'Carteirinhas aprovadas e sem pendencia documental para o administrador emitir.',
       entries: approvedReadyToIssue.slice(0, 3).map((registration) =>
-        buildRegEntry(registration, `Validade prevista: ${registration.expiryDate || '-'}`)
+        buildRegEntry(registration, `Validade prevista: ${registration.expiryDate || '-'}`, openRegistrationAction(registration, 'Emitir carteirinha'))
       )
     });
   }
@@ -177,7 +171,7 @@ export function buildNotificationSections({
         const whatsAppUrl = getApprovalWhatsAppUrl(registration.phone, registration.fullName);
         return buildRegEntry(
           registration,
-          `Telefone: ${registration.phone || 'não informado'}`,
+          `Telefone: ${registration.phone || 'nao informado'}`,
           whatsAppUrl ? { kind: 'link', label: 'Abrir WhatsApp', href: whatsAppUrl } : undefined
         );
       })
@@ -190,9 +184,9 @@ export function buildNotificationSections({
       tone: 'blue',
       icon: 'printer',
       title: 'Aguardando retirada',
-      description: 'Carteirinhas emitidas que ainda precisam de confirmação de retirada.',
+      description: 'Carteirinhas emitidas que ainda precisam de confirmacao de retirada.',
       entries: issuedAwaitingPickup.slice(0, 4).map((registration) =>
-        buildRegEntry(registration, `Telefone: ${registration.phone || 'não informado'}`)
+        buildRegEntry(registration, `Telefone: ${registration.phone || 'nao informado'}`, openRegistrationAction(registration, 'Registrar retirada', 'retiradas'))
       )
     });
   }
@@ -205,7 +199,7 @@ export function buildNotificationSections({
       title: 'Aprovadas sem telefone',
       description: 'Complete o telefone para facilitar o aviso ao paciente.',
       entries: missingPhoneApproved.slice(0, 3).map((registration) =>
-        buildRegEntry(registration, `CPF: ${maskCpf(registration.cpf)}`)
+        buildRegEntry(registration, `CPF: ${formatCpf(registration.cpf)}`, openRegistrationAction(registration, 'Completar telefone', 'pessoas'))
       )
     });
   }
@@ -216,9 +210,9 @@ export function buildNotificationSections({
       tone: 'slate',
       icon: 'phone-off',
       title: 'Emitidas sem telefone',
-      description: 'Registros emitidos sem contato podem dificultar renovação ou retirada.',
+      description: 'Registros emitidos sem contato podem dificultar renovacao ou retirada.',
       entries: issuedWithoutPhone.slice(0, 3).map((registration) =>
-        buildRegEntry(registration, `Validade: ${registration.expiryDate || '-'}`)
+        buildRegEntry(registration, `Validade: ${registration.expiryDate || '-'}`, openRegistrationAction(registration, 'Completar telefone', 'pessoas'))
       )
     });
   }
@@ -231,7 +225,7 @@ export function buildNotificationSections({
       title: 'Registros cancelados',
       description: 'Confira se os cancelamentos recentes foram auditados com motivo.',
       entries: cancelledRegistrations.slice(0, 3).map((registration) =>
-        buildRegEntry(registration, `CPF: ${maskCpf(registration.cpf)}`)
+        buildRegEntry(registration, `CPF: ${formatCpf(registration.cpf)}`, openRegistrationAction(registration, 'Ver historico', 'pessoas'))
       )
     });
   }
@@ -245,11 +239,11 @@ export function buildNotificationSections({
       icon: 'clock',
       title: registration.fullName,
       description: expired
-        ? `Venceu há ${Math.abs(diffDays)} dias`
+        ? `Venceu ha ${Math.abs(diffDays)} dias`
         : diffDays === 0
           ? 'Vence hoje!'
           : `Vence em ${diffDays} dias`,
-      entries: [buildRegEntry(registration, `CPF: ${maskCpf(registration.cpf)}`)]
+      entries: [buildRegEntry(registration, `CPF: ${formatCpf(registration.cpf)}`, openRegistrationAction(registration, 'Ver cadastro', 'pessoas'))]
     });
   });
 

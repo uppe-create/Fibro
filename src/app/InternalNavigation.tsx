@@ -1,5 +1,6 @@
 import {
   Activity,
+  ChevronDown,
   ClipboardCheck,
   ClipboardList,
   ClipboardPlus,
@@ -10,8 +11,10 @@ import {
   Settings,
   Shield,
   Users,
+  X,
   type LucideIcon
 } from 'lucide-react';
+import { useState } from 'react';
 import { hasPermission, type Permission } from '@/lib/permissions';
 import type { AppUser } from '@/store/useAppStore';
 
@@ -45,7 +48,7 @@ const INTERNAL_SECTIONS: InternalSection[] = [
   {
     label: 'Operacao',
     items: [
-      { value: 'operacao', label: 'Operacao', icon: ClipboardCheck, permission: 'viewOperations' },
+      { value: 'operacao', label: 'Aprovar', icon: ClipboardCheck, permission: 'viewOperations' },
       { value: 'documentos', label: 'Documentos', icon: FileWarning, permission: 'viewDocumentsQueue' },
       { value: 'retiradas', label: 'Retiradas', icon: PackageCheck, permission: 'viewPickupQueue' },
       { value: 'carteirinha', label: 'Carteirinha', icon: IdCard, permission: 'printCarteirinha' }
@@ -79,6 +82,13 @@ function getVisibleSections(currentUser: AppUser) {
 
 export function InternalNavigation({ activeTab, currentUser, onSelect }: InternalNavigationProps) {
   const sections = getVisibleSections(currentUser);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const activeItem = sections.flatMap((section) => section.items).find((item) => item.value === activeTab);
+
+  const selectMobile = (tab: string) => {
+    onSelect(tab);
+    setMobileOpen(false);
+  };
 
   return (
     <>
@@ -126,24 +136,51 @@ export function InternalNavigation({ activeTab, currentUser, onSelect }: Interna
       </aside>
 
       <div className="w-full lg:hidden">
-        <div className="overflow-x-auto pb-1">
-          <div className="flex min-w-max gap-2">
-            {sections.flatMap((section) => section.items).map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                onClick={() => onSelect(item.value)}
-                className={`inline-flex h-11 items-center gap-2 rounded-xl border px-4 text-sm font-semibold transition ${
-                  activeTab === item.value
-                    ? 'border-[var(--fibro-purple)] bg-[var(--fibro-purple)] text-white'
-                    : 'border-[#e7dfef] bg-white text-[#5d5068]'
-                }`}
-              >
-                <item.icon className="h-4 w-4" />
-                {item.label}
-              </button>
-            ))}
-          </div>
+        <div className="rounded-xl border border-[#e7dfef] bg-white shadow-[0_8px_22px_rgba(47,20,80,0.06)]">
+          <button
+            type="button"
+            onClick={() => setMobileOpen((open) => !open)}
+            className="flex h-12 w-full items-center justify-between gap-3 px-4 text-left text-sm font-black text-[#261735]"
+            aria-expanded={mobileOpen}
+            aria-controls="internal-mobile-nav"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              {activeItem ? <activeItem.icon className="h-4 w-4 shrink-0 text-[var(--fibro-purple)]" /> : <Shield className="h-4 w-4 shrink-0 text-[var(--fibro-purple)]" />}
+              <span className="truncate">{activeItem?.label || 'Menu interno'}</span>
+            </span>
+            {mobileOpen ? <X className="h-4 w-4 shrink-0 text-[#6f617b]" /> : <ChevronDown className="h-4 w-4 shrink-0 text-[#6f617b]" />}
+          </button>
+
+          {mobileOpen && (
+            <div id="internal-mobile-nav" className="grid gap-3 border-t border-[#ece7f3] p-3">
+              {sections.map((section) => (
+                <div key={section.label}>
+                  <p className="mb-1 px-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#8a7a97]">{section.label}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {section.items.map((item) => {
+                      const Icon = item.icon;
+                      const active = activeTab === item.value;
+                      return (
+                        <button
+                          key={item.value}
+                          type="button"
+                          onClick={() => selectMobile(item.value)}
+                          className={`flex min-h-11 min-w-0 items-center gap-2 rounded-lg border px-3 text-left text-xs font-semibold transition ${
+                            active
+                              ? 'border-[var(--fibro-purple)] bg-[var(--fibro-purple)] text-white'
+                              : 'border-[#e7dfef] bg-[#fbfafc] text-[#5d5068]'
+                          }`}
+                        >
+                          <Icon className={`h-4 w-4 shrink-0 ${active ? 'text-white' : 'text-[var(--fibro-purple)]'}`} />
+                          <span className="min-w-0 truncate">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </>

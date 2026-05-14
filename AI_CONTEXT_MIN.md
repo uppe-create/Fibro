@@ -10,6 +10,8 @@ Use este arquivo antes de abrir o codigo. Ele existe para reduzir consumo de tok
 - RLS restritiva, Storage privado, validacao publica por RPC, CSP sem inline e auditoria RPC ja foram implementados.
 - Admin sem MFA (`aal2`) cai como `viewer`; app ja tem desafio MFA e painel em Configuracoes.
 - SQL canonico vive em `supabase/migrations/`; SQL raiz e legado/manual.
+- Backup JSON integral foi desativado por LGPD; exportacao segue em CSV/PDF.
+- Home publica usa RPC agregada `get_home_metrics`.
 
 ## Mapa de arquivos
 - `src/App.tsx`: entrada fina; shell real fica em `src/app/*`.
@@ -34,10 +36,12 @@ Use este arquivo antes de abrir o codigo. Ele existe para reduzir consumo de tok
 - `src/lib/permissions.ts`: permissoes por perfil.
 - `src/lib/auth-mode.ts`: trava auth local em producao.
 - `src/lib/admin-rpc.ts`: chamadas `admin_transition_registration` e `admin_request_export`.
+- `src/lib/public-home-metrics.ts`: leitura agregada publica da home.
 - `src/lib/file-security.ts`: validacao segura de upload.
 - `src/lib/storage-files.ts`: Storage privado, metadados, URL assinada e rollback.
 - `src/lib/audit.ts`: auditoria por RPC `log_audit_event`.
 - `src/lib/dashboard-utils.ts`: helpers operacionais.
+- `docs/lgpd/*`: pacote minimo de governanca operacional.
 
 ## Comandos eficientes
 - `npm run ai:context`: mapa compacto e maiores arquivos.
@@ -52,3 +56,4 @@ Use este arquivo antes de abrir o codigo. Ele existe para reduzir consumo de tok
 - Endurecer acoes operacionais migrando mais caminhos para RPC/Edge Functions.
 - Consolidar/aplicar sempre via `supabase/migrations/`.
 - Ampliar e2e autenticado por perfil.
+- Alinhar historico remoto de migrations para push seguro pelo CLI.

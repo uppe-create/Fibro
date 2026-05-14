@@ -129,20 +129,21 @@ export function NotificationCard({ section, onAction }: Props) {
       {section.entries?.length ? (
         <div className="space-y-2">
           {section.entries.map((entry) => (
-            <div key={entry.id} className={`rounded-lg px-3 py-2 ${styles.entry}`}>
+            <button
+              key={entry.id}
+              type="button"
+              onClick={() => entry.action && onAction?.(entry.action)}
+              disabled={!entry.action}
+              className={`w-full rounded-lg px-3 py-2 text-left ${styles.entry} ${entry.action ? 'cursor-pointer hover:ring-2 hover:ring-[#7b2cbf]/20' : 'cursor-default'}`}
+            >
               <p className="truncate text-sm font-semibold text-[#1D1D1F]">{entry.title}</p>
               <p className={`text-xs mt-1 ${styles.body}`}>{entry.subtitle}</p>
-              {entry.action?.kind === 'link' ? (
-                <a
-                  href={entry.action.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-2 inline-flex h-8 w-full items-center justify-center rounded-lg bg-[#168821] px-3 text-xs font-bold text-white hover:bg-[#126b1c]"
-                >
+              {entry.action ? (
+                <span className="mt-2 inline-flex h-8 w-full items-center justify-center rounded-lg bg-[#168821] px-3 text-xs font-bold text-white hover:bg-[#126b1c]">
                   {entry.action.label}
-                </a>
+                </span>
               ) : null}
-            </div>
+            </button>
           ))}
         </div>
       ) : null}

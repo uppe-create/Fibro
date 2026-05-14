@@ -29,9 +29,9 @@ export function NavigationTabs({ activeTab, currentUser, setActiveTab }: Navigat
   };
 
   return (
-    <nav className="min-w-0 flex-1 xl:flex xl:justify-center" aria-label="Navegação principal">
+    <nav className="min-w-0 xl:flex xl:justify-center" aria-label="Navegação principal">
       <div className="xl:hidden">
-        <TabsList className="grid h-auto grid-cols-2 gap-1 rounded-none bg-transparent p-0">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-none bg-transparent p-0">
           {primaryMobileItems.map((item) => {
             const Icon = item.icon;
             return (
