@@ -47,6 +47,28 @@ end;
 $$;
 select 'attendant_cannot_delete_registration_index' as test, exists(select 1 from registration_index where cpf = '11111111111') as ok;
 
+do $$
+begin
+  begin
+    perform public.admin_create_lgpd_request('acesso', 'TESTE LGPD', '11111111111', 'presencial', current_date + 15, null, 'SEC SAUDE');
+    raise exception 'attendant_governance_should_fail';
+  exception
+    when insufficient_privilege then
+      null;
+    when others then
+      if position('forbidden' in lower(sqlerrm)) > 0 then
+        null;
+      else
+        raise;
+      end if;
+  end;
+end;
+$$;
+select 'attendant_cannot_create_lgpd_request' as test, true as ok;
+
+set local request.jwt.claims = '{"sub":"00000000-0000-4000-8000-000000000001","role":"authenticated","app_role":"admin","aal":"aal2"}';
+select 'admin_can_read_governance_retention' as test, exists(select 1 from lgpd_retention_rules) as ok;
+
 delete from registration_index where cpf = '11111111111';
 select 'admin_can_delete_registration_index' as test, not exists(select 1 from registration_index where cpf = '11111111111') as ok;
 

@@ -1,5 +1,10 @@
 import { buildAuditEvent, type AuditEventInput } from '@/lib/audit-events';
-import { runAdminWorkflowRpc } from '@/lib/admin-rpc';
+import {
+  archiveDatabaseSecure,
+  recordPatientContactSecure,
+  recordPickupSecure,
+  runAdminWorkflowRpc
+} from '@/lib/admin-rpc';
 import { getAuthMode } from '@/lib/auth-mode';
 import { logAuditEvent } from '@/lib/audit';
 import { datePlusYearsBR, todayBR, toDigits } from '@/lib/dashboard-utils';
@@ -116,6 +121,11 @@ export function useRegistrationWorkflow({ currentUser, reload, onError }: Workfl
       }),
     notifyPatient: (reg: CIPFRegistration, channel: string) =>
       run(async () => {
+        if (isSupabaseAuth) {
+          await recordPatientContactSecure(reg.id, channel);
+          await reload();
+          return;
+        }
         const payload = {
           patient_notified_at: new Date().toISOString(),
           patient_notified_by: currentUser?.name || 'Sistema',
@@ -130,6 +140,11 @@ export function useRegistrationWorkflow({ currentUser, reload, onError }: Workfl
       }),
     registerPickup: (reg: CIPFRegistration, note: string) =>
       run(async () => {
+        if (isSupabaseAuth) {
+          await recordPickupSecure(reg.id, note);
+          await reload();
+          return;
+        }
         const payload = {
           picked_up_at: new Date().toISOString(),
           picked_up_by: currentUser?.name || 'Sistema',
@@ -156,6 +171,13 @@ export function useRegistrationWorkflow({ currentUser, reload, onError }: Workfl
           supabase.from('registration_index').update({ status: 'cancelled', updated_at: new Date().toISOString() }).eq('cpf', toDigits(reg.cpf))
         ]);
         await reload();
+      }),
+    archiveAll: (reason: string) =>
+      run(async () => {
+        if (isSupabaseAuth) {
+          await archiveDatabaseSecure(reason);
+          await reload();
+        }
       }),
     addInternalNote: (reg: CIPFRegistration, note: string) =>
       run(() =>

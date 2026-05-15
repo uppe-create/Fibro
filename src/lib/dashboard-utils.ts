@@ -50,6 +50,10 @@ export function formatCpf(cpf: string): string {
   return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
 }
 
+export function formatCpfByPermission(cpf: string, canViewFullCpf: boolean): string {
+  return canViewFullCpf ? formatCpf(cpf) : maskCpf(cpf);
+}
+
 export function normalizeForExport(reg: CIPFRegistration) {
   return {
     nome: reg.fullName,
@@ -155,11 +159,11 @@ export function getNextOperationalAction(reg: CIPFRegistration): string {
   return 'Sem ação pendente';
 }
 
-export function buildSafeRegistrationSummary(reg: CIPFRegistration): string {
+export function buildSafeRegistrationSummary(reg: CIPFRegistration, canViewFullCpf = true): string {
   const issues = getDocumentIssues(reg);
   return [
     `Titular: ${reg.fullName}`,
-    `CPF: ${formatCpf(reg.cpf)}`,
+    `CPF: ${formatCpfByPermission(reg.cpf, canViewFullCpf)}`,
     `Status: ${getStatusLabel(reg.status)}`,
     `Validade: ${reg.expiryDate || '-'}`,
     `Telefone: ${formatPhone(reg.phone || '') || '-'}`,

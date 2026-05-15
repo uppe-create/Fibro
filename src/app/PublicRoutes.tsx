@@ -15,6 +15,7 @@ import {
   Dashboard,
   DevTools,
   Documentos,
+  Governanca,
   Home,
   IS_PRODUCTION,
   Relatorios,
@@ -232,19 +233,19 @@ export function PublicRoutes({ activeTab }: { activeTab: string }) {
             </TabsContent>
 
             <TabsContent value="operacao" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewOperations" deniedMessage="Apenas administradores acessam a operacao administrativa.">
+              <ProtectedRoute permission="viewOperations" deniedMessage="Este perfil nao acessa a fila operacional.">
                 <Operacao />
               </ProtectedRoute>
             </TabsContent>
 
             <TabsContent value="documentos" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewDocumentsQueue" deniedMessage="Apenas administradores acessam a fila documental.">
+              <ProtectedRoute permission="viewDocumentsQueue" deniedMessage="Este perfil nao acessa a fila documental.">
                 <Documentos />
               </ProtectedRoute>
             </TabsContent>
 
             <TabsContent value="retiradas" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewPickupQueue" deniedMessage="Apenas administradores acessam a fila de retiradas.">
+              <ProtectedRoute permission="viewPickupQueue" deniedMessage="Este perfil nao acessa a fila de retiradas.">
                 <Retiradas />
               </ProtectedRoute>
             </TabsContent>
@@ -258,6 +259,12 @@ export function PublicRoutes({ activeTab }: { activeTab: string }) {
             <TabsContent value="auditoria" className="mt-0 outline-none">
               <ProtectedRoute permission="viewAudit" deniedMessage="Apenas administradores acessam a auditoria do sistema.">
                 <Auditoria />
+              </ProtectedRoute>
+            </TabsContent>
+
+            <TabsContent value="governanca" className="mt-0 outline-none">
+              <ProtectedRoute permission="viewGovernance" deniedMessage="Somente administradores acessam governanca LGPD e incidente.">
+                <Governanca />
               </ProtectedRoute>
             </TabsContent>
 

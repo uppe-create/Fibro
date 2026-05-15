@@ -75,6 +75,26 @@ using (public.current_app_role() = 'admin');
 drop policy if exists authenticated_read_public_validations on public.public_validations;
 drop policy if exists admin_read_public_validations_only on public.public_validations;
 
-create policy admin_read_public_validations_only
-on public.public_validations for select to authenticated
-using (public.current_app_role() = 'admin' and deleted_at is null);
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'public_validations'
+      and column_name = 'deleted_at'
+  ) then
+    execute $policy$
+      create policy admin_read_public_validations_only
+      on public.public_validations for select to authenticated
+      using (public.current_app_role() = 'admin' and deleted_at is null)
+    $policy$;
+  else
+    execute $policy$
+      create policy admin_read_public_validations_only
+      on public.public_validations for select to authenticated
+      using (public.current_app_role() = 'admin')
+    $policy$;
+  end if;
+end;
+$$;

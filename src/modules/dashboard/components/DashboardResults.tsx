@@ -1,6 +1,7 @@
-import { CalendarClock, Eye, FileBadge2, FileText, MoreHorizontal, Pencil, ShieldAlert, Trash2 } from 'lucide-react';
+import { CalendarClock, Eye, FileBadge2, FileSearch, FileText, MoreHorizontal, Pencil, ShieldAlert, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { formatCpf, getExpiryHighlight, isReadyToPrint } from '@/lib/dashboard-utils';
+import { EmptyState } from '@/components/ui/layout';
+import { formatCpfByPermission, getExpiryHighlight, isReadyToPrint } from '@/lib/dashboard-utils';
 import { isPrintableStatus } from '@/lib/registration-status';
 import type { CIPFRegistration } from '@/store/useAppStore';
 import { StatusChip } from './StatusParts';
@@ -11,6 +12,7 @@ type Permissions = {
   canViewDocuments: boolean;
   canViewHistory: boolean;
   canDeleteRegistration: boolean;
+  canViewFullCpf: boolean;
 };
 
 type Props = {
@@ -23,15 +25,23 @@ type Props = {
   onDocument: (reg: CIPFRegistration) => void;
   onHistory: (reg: CIPFRegistration) => void;
   onDelete: (reg: CIPFRegistration) => void;
+  onResetFilters?: () => void;
 };
 
-export function DashboardResults({ registrations, isLoading, permissions, onPreview, onDetails, onEdit, onDocument, onHistory, onDelete }: Props) {
+export function DashboardResults({ registrations, isLoading, permissions, onPreview, onDetails, onEdit, onDocument, onHistory, onDelete, onResetFilters }: Props) {
   return (
     <div id="dashboard-results" className="cipf-panel scroll-mt-32 overflow-hidden">
       {isLoading ? (
         <div className="p-12 text-center text-[#6f617b]">Carregando registros...</div>
       ) : registrations.length === 0 ? (
-        <div className="cipf-empty m-4 text-center">Nenhum registro encontrado para os filtros aplicados.</div>
+        <div className="m-4">
+          <EmptyState
+            title="Nenhum cadastro nesta busca"
+            description="Revise filtros ou limpe a busca para voltar a fila."
+            icon={<FileSearch className="h-5 w-5" />}
+            action={onResetFilters ? <Button type="button" variant="outline" onClick={onResetFilters}>Limpar filtros</Button> : undefined}
+          />
+        </div>
       ) : (
         <>
           <div className="space-y-3 p-3 md:hidden">
@@ -74,7 +84,7 @@ export function DashboardResults({ registrations, isLoading, permissions, onPrev
                         </button>
                       </div>
                     </td>
-                    <td className="px-5 py-4 font-mono text-xs text-[#4f455f]">{formatCpf(reg.cpf)}</td>
+                    <td className="px-5 py-4 font-mono text-xs text-[#4f455f]">{formatCpfByPermission(reg.cpf, permissions.canViewFullCpf)}</td>
                     <td className="px-5 py-4 font-mono text-xs text-[#4f455f]">{formatCns(reg.cns)}</td>
                     <td className="px-5 py-4 text-[#4f455f]">{reg.bairro || '-'}</td>
                     <td className="px-5 py-4"><StatusChip status={reg.status} /></td>
@@ -135,7 +145,7 @@ function MobileCard(props: Omit<Props, 'registrations' | 'isLoading'> & { reg: C
           <Initials name={reg.fullName} />
           <div className="min-w-0">
             <p className="break-words text-sm font-bold leading-5 text-[#170b24]">{reg.fullName}</p>
-            <p className="text-xs text-[#6f617b]">{formatCpf(reg.cpf)}</p>
+            <p className="text-xs text-[#6f617b]">{formatCpfByPermission(reg.cpf, permissions.canViewFullCpf)}</p>
             <p className="text-xs text-[#6f617b]">{reg.bairro || '-'} - Validade {reg.expiryDate || '-'}</p>
           </div>
         </div>

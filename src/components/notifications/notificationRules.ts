@@ -2,7 +2,7 @@ import { daysUntil, parseBRDate } from '@/lib/date';
 import { getDocumentIssues } from '@/lib/dashboard-utils';
 import { normalizeRegistrationStatus } from '@/lib/registration-status';
 import type { AppUser, CIPFRegistration } from '@/store/useAppStore';
-import { formatCpf, getApprovalWhatsAppUrl, onlyDigits } from './notification-utils';
+import { formatCpf, getApprovalWhatsAppUrl, maskCpf, onlyDigits } from './notification-utils';
 
 export type NotificationTone = 'blue' | 'red' | 'amber' | 'orange' | 'green' | 'purple' | 'slate' | 'zinc';
 export type NotificationIconKey =
@@ -74,6 +74,7 @@ export function buildNotificationSections({
   registrations,
   currentUser
 }: BuildNotificationSectionsParams): { sections: NotificationSection[]; unreadCount: number } {
+  const formatInternalCpf = (value: string) => (currentUser?.role === 'admin' ? formatCpf(value) : maskCpf(value));
   const canHandleOperationalAlerts = currentUser?.role === 'admin' || currentUser?.role === 'attendant';
   const pendingApprovalRegistrations = canHandleOperationalAlerts ? byStatus(registrations, 'under_review').slice(0, 8) : [];
   const approvedAwaitingContact = canHandleOperationalAlerts
@@ -129,7 +130,7 @@ export function buildNotificationSections({
       title: 'Carteirinhas aguardando aprovacao',
       description: `${pendingApprovalRegistrations.length} cadastro(s) em analise precisam de conferencia.`,
       entries: pendingApprovalRegistrations.slice(0, 4).map((registration) =>
-        buildRegEntry(registration, `CPF: ${formatCpf(registration.cpf)}`, openRegistrationAction(registration, 'Abrir aprovacao'))
+        buildRegEntry(registration, `CPF: ${formatInternalCpf(registration.cpf)}`, openRegistrationAction(registration, 'Abrir aprovacao'))
       )
     });
   }
@@ -199,7 +200,7 @@ export function buildNotificationSections({
       title: 'Aprovadas sem telefone',
       description: 'Complete o telefone para facilitar o aviso ao paciente.',
       entries: missingPhoneApproved.slice(0, 3).map((registration) =>
-        buildRegEntry(registration, `CPF: ${formatCpf(registration.cpf)}`, openRegistrationAction(registration, 'Completar telefone', 'pessoas'))
+        buildRegEntry(registration, `CPF: ${formatInternalCpf(registration.cpf)}`, openRegistrationAction(registration, 'Completar telefone', 'pessoas'))
       )
     });
   }
@@ -225,7 +226,7 @@ export function buildNotificationSections({
       title: 'Registros cancelados',
       description: 'Confira se os cancelamentos recentes foram auditados com motivo.',
       entries: cancelledRegistrations.slice(0, 3).map((registration) =>
-        buildRegEntry(registration, `CPF: ${formatCpf(registration.cpf)}`, openRegistrationAction(registration, 'Ver historico', 'pessoas'))
+        buildRegEntry(registration, `CPF: ${formatInternalCpf(registration.cpf)}`, openRegistrationAction(registration, 'Ver historico', 'pessoas'))
       )
     });
   }
@@ -243,7 +244,7 @@ export function buildNotificationSections({
         : diffDays === 0
           ? 'Vence hoje!'
           : `Vence em ${diffDays} dias`,
-      entries: [buildRegEntry(registration, `CPF: ${formatCpf(registration.cpf)}`, openRegistrationAction(registration, 'Ver cadastro', 'pessoas'))]
+      entries: [buildRegEntry(registration, `CPF: ${formatInternalCpf(registration.cpf)}`, openRegistrationAction(registration, 'Ver cadastro', 'pessoas'))]
     });
   });
 

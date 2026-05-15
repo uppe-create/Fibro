@@ -54,18 +54,21 @@ export function EmptyState({
   title,
   description,
   icon,
+  action,
   className
 }: {
   title: string;
   description?: string;
   icon?: ReactNode;
+  action?: ReactNode;
   className?: string;
 }) {
   return (
     <div className={cn('cipf-empty text-center', className)}>
-      {icon && <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center bg-[#edf4fb] text-[var(--brand-primary)]">{icon}</div>}
-      <p className="font-semibold text-[var(--brand-ink)]">{title}</p>
+      {icon && <div className="mx-auto mb-4 flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-muted)] text-[var(--brand-primary)]">{icon}</div>}
+      <p className="text-sm font-black text-[var(--brand-ink)]">{title}</p>
       {description && <p className="mt-1 text-sm leading-6 text-[var(--brand-muted)]">{description}</p>}
+      {action && <div className="mt-4 flex justify-center">{action}</div>}
     </div>
   );
 }

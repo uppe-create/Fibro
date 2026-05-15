@@ -14,11 +14,12 @@
   --brand-ink: #071d41;
   --brand-muted: #5b677a;
   --brand-muted-soft: #7a8797;
-  --surface-bg: #fbfafc;
-  --surface-soft: #faf8fb;
+  --surface-bg: #f8fafc;
+  --surface-soft: #f3f6f9;
+  --surface-muted: #eef2f6;
   --surface-card: #ffffff;
-  --border-soft: #d6dce5;
-  --border-subtle: #e3e9ef;
+  --border-soft: #cfd8e3;
+  --border-subtle: #dde5ee;
   --font-ui: "Aptos", "Segoe UI", "Verdana", sans-serif;
   --font-display: "Bahnschrift", "Aptos Display", "Segoe UI Semibold", sans-serif;
 }
@@ -435,14 +436,14 @@ button:active {
 }
 
 .cipf-panel {
-  border: 1px solid #e4ddea;
+  border: 1px solid var(--border-subtle);
   border-radius: 0.5rem;
   background: var(--surface-card);
-  box-shadow: 0 1px 2px rgba(72, 45, 91, 0.05);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 28px rgba(15, 23, 42, 0.04);
 }
 
 .cipf-subpanel {
-  border: 1px solid #ece7f3;
+  border: 1px solid var(--border-subtle);
   border-radius: 0.45rem;
   background: var(--surface-soft);
 }
@@ -455,8 +456,8 @@ button:active {
 
 .cipf-empty {
   border: 1px dashed var(--border-soft);
-  border-radius: 0.45rem;
-  background: var(--surface-soft);
+  border-radius: 0.65rem;
+  background: linear-gradient(180deg, var(--surface-card) 0%, var(--surface-soft) 100%);
   color: var(--brand-muted);
   padding: 1.5rem;
 }

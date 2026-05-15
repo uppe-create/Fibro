@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Download, FileDown, Minimize2, Plus, RefreshCw } from 'lucide-react';
 import { buildAuditEvent, getAuditHistoryFilterKey, type AuditEntryRow } from '@/lib/audit-events';
+import { isSecureAdminBackendEnabled, updateRegistrationSecure } from '@/lib/admin-rpc';
 import { normalizeAuditEntries } from '@/lib/audit-history';
 import { supabase } from '@/lib/supabase';
 import { loadCipfFileDataUri, openInNewTab } from '@/lib/cipf-files';
@@ -56,8 +57,9 @@ export function Pessoas() {
     canDeleteRegistration: false,
     canEditRegistration: hasPermission(currentUser, 'editRegistration'),
     canExportDashboard: hasPermission(currentUser, 'exportDashboard'),
-    canViewDocuments: hasPermission(currentUser, 'viewDocuments'),
+    canViewDocuments: hasPermission(currentUser, 'viewSensitiveDocuments'),
     canViewHistory: hasPermission(currentUser, 'viewHistory'),
+    canViewFullCpf: hasPermission(currentUser, 'viewFullCpf'),
     canPrintCarteirinha: false,
     canApproveRegistration: false,
     canIssueRegistration: false,
@@ -174,15 +176,19 @@ export function Pessoas() {
         status: editForm.status
       };
 
-      const { error: registrationError } = await supabase.from('registrations').update(payload).eq('id', modal.editReg.id);
-      if (registrationError) throw registrationError;
+      if (isSecureAdminBackendEnabled()) {
+        await updateRegistrationSecure(modal.editReg.id, payload, reason);
+      } else {
+        const { error: registrationError } = await supabase.from('registrations').update(payload).eq('id', modal.editReg.id);
+        if (registrationError) throw registrationError;
 
-      await supabase
-        .from('public_validations')
-        .update({ fullName: payload.fullName, issueDate: payload.issueDate, expiryDate: payload.expiryDate, status: payload.status })
-        .eq('id', modal.editReg.id);
-      await supabase.from('registration_index').update({ status: payload.status, updated_at: new Date().toISOString() }).eq('cpf', toDigits(modal.editReg.cpf));
-      await workflow.writeAudit(buildAuditEvent('registration.edited', { registrationId: modal.editReg.id, targetLabel: modal.editReg.fullName, details: reason }));
+        await supabase
+          .from('public_validations')
+          .update({ fullName: payload.fullName, issueDate: payload.issueDate, expiryDate: payload.expiryDate, status: payload.status })
+          .eq('id', modal.editReg.id);
+        await supabase.from('registration_index').update({ status: payload.status, updated_at: new Date().toISOString() }).eq('cpf', toDigits(modal.editReg.cpf));
+        await workflow.writeAudit(buildAuditEvent('registration.edited', { registrationId: modal.editReg.id, targetLabel: modal.editReg.fullName, details: reason }));
+      }
 
       setModal({ editReg: null, confirmAction: null, editFocusSection: null });
       await loadData();
@@ -242,8 +248,8 @@ export function Pessoas() {
   };
 
   const copySummary = async (reg: CIPFRegistration) => {
-    await navigator.clipboard.writeText(buildSafeRegistrationSummary(reg));
-    await workflow.writeAudit(buildAuditEvent('export.summary_copied', { registrationId: reg.id, targetLabel: reg.fullName, details: 'Resumo com CPF completo e sem dados medicos sensiveis' }));
+    await navigator.clipboard.writeText(buildSafeRegistrationSummary(reg, permissions.canViewFullCpf));
+    await workflow.writeAudit(buildAuditEvent('export.summary_copied', { registrationId: reg.id, targetLabel: reg.fullName, details: `Resumo com CPF ${permissions.canViewFullCpf ? 'completo' : 'mascarado'} e sem dados medicos sensiveis` }));
   };
 
   return (
@@ -258,7 +264,7 @@ export function Pessoas() {
       <div className="flex flex-col justify-between gap-5 xl:flex-row xl:items-center">
         <div>
           <h3 className="cipf-title text-xl">Cadastros</h3>
-          <p className="cipf-description mt-1 text-sm">{dashboard.filteredRegistrations.length} registro(s) · consulta interna com CPF completo.</p>
+          <p className="cipf-description mt-1 text-sm">{dashboard.filteredRegistrations.length} registro(s) · consulta interna com CPF {permissions.canViewFullCpf ? 'completo' : 'mascarado'}.</p>
         </div>
         <ActionGrid>
           {permissions.canExportDashboard && (
@@ -275,7 +281,7 @@ export function Pessoas() {
       {(loadError || message) && <div className="cipf-subpanel border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{loadError || message}</div>}
 
       <DashboardFilters filters={dashboard.filters} actions={dashboard.filterActions} cidOptions={dashboard.cidOptions} bairroOptions={dashboard.bairroOptions} searchInputRef={searchInputRef} />
-      <DashboardResults registrations={dashboard.filteredRegistrations} isLoading={isLoading} permissions={permissions} onPreview={openPreview} onDetails={(reg) => setModal({ detailReg: reg })} onEdit={openEdit} onDocument={openDocument} onHistory={openHistory} onDelete={() => undefined} />
+      <DashboardResults registrations={dashboard.filteredRegistrations} isLoading={isLoading} permissions={permissions} onPreview={openPreview} onDetails={(reg) => setModal({ detailReg: reg })} onEdit={openEdit} onDocument={openDocument} onHistory={openHistory} onDelete={() => undefined} onResetFilters={dashboard.filterActions.clearFilters} />
 
       {hasPermission(currentUser, 'viewAudit') && (
         <section className="pt-2">

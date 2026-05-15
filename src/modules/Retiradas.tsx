@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MessageCircle, PackageCheck, RefreshCw, Search } from 'lucide-react';
+import { FileBadge2, MessageCircle, PackageCheck, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PageHeader } from '@/components/ui/layout';
+import { EmptyState, PageHeader } from '@/components/ui/layout';
 import { ModalShell } from '@/components/ui/modal-shell';
-import { buildWhatsAppMessage, buildWhatsAppUrl, formatCpf, isAwaitingPickup, toDigits } from '@/lib/dashboard-utils';
+import { buildWhatsAppMessage, buildWhatsAppUrl, formatCpfByPermission, isAwaitingPickup, toDigits } from '@/lib/dashboard-utils';
+import { hasPermission } from '@/lib/permissions';
 import { formatPhone } from '@/lib/utils';
 import { useAppStore, type CIPFRegistration } from '@/store/useAppStore';
 import { useRegistrationWorkflow } from './dashboard/hooks/useRegistrationWorkflow';
@@ -32,6 +33,7 @@ export function Retiradas() {
   const [isLoading, setIsLoading] = useState(false);
   const [pickupDraft, setPickupDraft] = useState<PickupDraft | null>(null);
   const [whatsAppDraft, setWhatsAppDraft] = useState<WhatsAppDraft | null>(null);
+  const canViewFullCpf = hasPermission(currentUser, 'viewFullCpf');
 
   const loadData = async () => {
     setIsLoading(true);
@@ -125,7 +127,7 @@ export function Retiradas() {
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div className="min-w-0">
                   <p className="truncate text-base font-semibold text-[var(--brand-ink)]">{reg.fullName}</p>
-                  <p className="mt-1 text-xs text-[#617184]">{formatCpf(reg.cpf)} • Validade {reg.expiryDate || '-'} • {formatPhone(reg.phone || '') || 'Telefone não informado'}</p>
+                  <p className="mt-1 text-xs text-[#617184]">{formatCpfByPermission(reg.cpf, canViewFullCpf)} • Validade {reg.expiryDate || '-'} • {formatPhone(reg.phone || '') || 'Telefone não informado'}</p>
                   <p className="mt-2 text-sm font-semibold text-[#7b2cbf]">Emitida e aguardando retirada presencial.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -153,9 +155,13 @@ export function Retiradas() {
             </div>
           ))}
           {!pickupQueue.length && (
-            <div className="cipf-empty text-sm text-green-800">
-              Nenhuma carteirinha aguardando retirada para os filtros atuais.
-            </div>
+            <EmptyState
+              title="Nada aguardando retirada"
+              description="Quando houver carteirinhas emitidas sem baixa presencial, elas aparecem aqui."
+              icon={<FileBadge2 className="h-5 w-5" />}
+              action={<Button type="button" variant="outline" onClick={() => setSearchTerm('')}>Limpar busca</Button>}
+              className="text-sm"
+            />
           )}
         </div>
       </section>

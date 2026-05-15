@@ -3,7 +3,7 @@ import { RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { AuditTimeline } from '@/components/audit/AuditTimeline';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { PageHeader } from '@/components/ui/layout';
+import { EmptyState, PageHeader } from '@/components/ui/layout';
 import { filterAuditEntries, normalizeAuditEntries } from '@/lib/audit-history';
 import { AUDIT_CATEGORY_LABELS, AUDIT_SEVERITY_LABELS, type AuditCategory, type AuditEntryRow, type AuditMode, type AuditSeverity } from '@/lib/audit-events';
 import { supabase } from '@/lib/supabase';
@@ -103,7 +103,16 @@ export function Auditoria() {
           <StatPill label="Cadastros" value={String(filteredEntries.filter((entry) => entry.targetType === 'registration').length)} />
         </div>
 
-        <AuditTimeline entries={filteredEntries} emptyMessage="Nenhum evento encontrado para filtros atuais." />
+        {entries.length === 0 && !isLoading ? (
+          <EmptyState
+            title="Auditoria sem eventos"
+            description="Recarregue a linha do tempo ou ajuste o ambiente antes de validar acessos."
+            icon={<ShieldCheck className="h-5 w-5" />}
+            action={<Button type="button" variant="outline" onClick={loadData}>Atualizar auditoria</Button>}
+          />
+        ) : (
+          <AuditTimeline entries={filteredEntries} emptyMessage="Nenhum evento encontrado para filtros atuais." />
+        )}
       </section>
     </div>
   );

@@ -1,6 +1,6 @@
 import { Printer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { formatCpf, getDocumentIssues, toDigits } from '@/lib/dashboard-utils';
+import { formatCpfByPermission, getDocumentIssues, toDigits } from '@/lib/dashboard-utils';
 import {
   canApproveStatus,
   canIssueStatus,
@@ -17,6 +17,7 @@ type Permissions = {
   canRegisterPatientContact: boolean;
   canRegisterPickup: boolean;
   canEditRegistration: boolean;
+  canViewFullCpf: boolean;
 };
 
 type Props = {
@@ -78,7 +79,7 @@ export function DashboardQueues({
                 />
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-bold text-[#17324d]">{reg.fullName}</span>
-                  <span className="block text-xs text-[#617184]">{formatCpf(reg.cpf)} • validade {reg.expiryDate || '-'}</span>
+                  <span className="block text-xs text-[#617184]">{formatCpfByPermission(reg.cpf, permissions.canViewFullCpf)} • validade {reg.expiryDate || '-'}</span>
                 </span>
               </label>
             ))}
@@ -106,7 +107,7 @@ export function DashboardQueues({
                       <p className="break-words text-sm font-bold text-[#17324d]">{reg.fullName}</p>
                       <span className="w-fit rounded-full bg-white px-2 py-1 text-[11px] font-black text-[#5b2785]">{getStatusLabel(reg.status)}</span>
                     </div>
-                    <p className="mt-1 text-xs leading-5 text-[#617184]">{formatCpf(reg.cpf)} - Validade {reg.expiryDate || '-'}</p>
+                    <p className="mt-1 text-xs leading-5 text-[#617184]">{formatCpfByPermission(reg.cpf, permissions.canViewFullCpf)} - Validade {reg.expiryDate || '-'}</p>
                     <p className="mt-2 text-xs font-semibold leading-5 text-[#7b2cbf]">{item.nextAction}</p>
                     {item.staleAlerts.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">

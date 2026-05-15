@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarClock, Download, FileDown, Minimize2, RefreshCw, Trash2 } from 'lucide-react';
 import { buildAuditEvent, getAuditHistoryFilterKey, type AuditEntryRow } from '@/lib/audit-events';
+import { isSecureAdminBackendEnabled, updateRegistrationSecure } from '@/lib/admin-rpc';
 import { normalizeAuditEntries } from '@/lib/audit-history';
 import { supabase } from '@/lib/supabase';
 import { loadCipfFileDataUri, openInNewTab } from '@/lib/cipf-files';
@@ -55,8 +56,9 @@ export function Operacao() {
     canDeleteRegistration: hasPermission(currentUser, 'deleteRegistration'),
     canEditRegistration: hasPermission(currentUser, 'editRegistration'),
     canExportDashboard: hasPermission(currentUser, 'exportDashboard'),
-    canViewDocuments: hasPermission(currentUser, 'viewDocuments'),
+    canViewDocuments: hasPermission(currentUser, 'viewSensitiveDocuments'),
     canViewHistory: hasPermission(currentUser, 'viewHistory'),
+    canViewFullCpf: hasPermission(currentUser, 'viewFullCpf'),
     canPrintCarteirinha: hasPermission(currentUser, 'printCarteirinha'),
     canApproveRegistration: hasPermission(currentUser, 'approveRegistration'),
     canIssueRegistration: hasPermission(currentUser, 'issueRegistration'),
@@ -161,11 +163,15 @@ export function Operacao() {
         expiryDate: editForm.expiryDate,
         status: editForm.status
       };
-      const { error: registrationError } = await supabase.from('registrations').update(payload).eq('id', modal.editReg.id);
-      if (registrationError) throw registrationError;
-      await supabase.from('public_validations').update({ fullName: payload.fullName, issueDate: payload.issueDate, expiryDate: payload.expiryDate, status: payload.status }).eq('id', modal.editReg.id);
-      await supabase.from('registration_index').update({ status: payload.status, updated_at: new Date().toISOString() }).eq('cpf', toDigits(modal.editReg.cpf));
-      await workflow.writeAudit(buildAuditEvent('registration.edited', { registrationId: modal.editReg.id, targetLabel: modal.editReg.fullName, details: reason }));
+      if (isSecureAdminBackendEnabled()) {
+        await updateRegistrationSecure(modal.editReg.id, payload, reason);
+      } else {
+        const { error: registrationError } = await supabase.from('registrations').update(payload).eq('id', modal.editReg.id);
+        if (registrationError) throw registrationError;
+        await supabase.from('public_validations').update({ fullName: payload.fullName, issueDate: payload.issueDate, expiryDate: payload.expiryDate, status: payload.status }).eq('id', modal.editReg.id);
+        await supabase.from('registration_index').update({ status: payload.status, updated_at: new Date().toISOString() }).eq('cpf', toDigits(modal.editReg.cpf));
+        await workflow.writeAudit(buildAuditEvent('registration.edited', { registrationId: modal.editReg.id, targetLabel: modal.editReg.fullName, details: reason }));
+      }
       setModal({ editReg: null, confirmAction: null, editFocusSection: null });
       await loadData();
     } catch (error: any) {
@@ -247,8 +253,8 @@ export function Operacao() {
   };
 
   const copySummary = async (reg: CIPFRegistration) => {
-    await navigator.clipboard.writeText(buildSafeRegistrationSummary(reg));
-    await workflow.writeAudit(buildAuditEvent('export.summary_copied', { registrationId: reg.id, targetLabel: reg.fullName, details: 'Resumo com CPF completo e sem dados medicos sensiveis' }));
+    await navigator.clipboard.writeText(buildSafeRegistrationSummary(reg, permissions.canViewFullCpf));
+    await workflow.writeAudit(buildAuditEvent('export.summary_copied', { registrationId: reg.id, targetLabel: reg.fullName, details: `Resumo com CPF ${permissions.canViewFullCpf ? 'completo' : 'mascarado'} e sem dados medicos sensiveis` }));
   };
 
   const batchPrint = () => {
@@ -277,7 +283,7 @@ export function Operacao() {
         </ActionGrid>
       </div>
       {(loadError || message) && <div className="cipf-subpanel border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{loadError || message}</div>}
-      <DashboardStats stats={dashboard.stats} todayActions={dashboard.todayActions} quickSearchTerm={dashboard.filters.quickSearchTerm} onQuickSearchChange={dashboard.filterActions.setQuickSearchTerm} quickResults={dashboard.quickResults} onOpenDetails={(reg) => setModal({ detailReg: reg })} onCopySummary={copySummary} />
+      <DashboardStats stats={dashboard.stats} todayActions={dashboard.todayActions} quickSearchTerm={dashboard.filters.quickSearchTerm} onQuickSearchChange={dashboard.filterActions.setQuickSearchTerm} quickResults={dashboard.quickResults} onOpenDetails={(reg) => setModal({ detailReg: reg })} onCopySummary={copySummary} canViewFullCpf={permissions.canViewFullCpf} />
       <DashboardQueues operationalQueue={dashboard.operationalQueue} documentIssueQueue={dashboard.documentIssueQueue} batchPrintableRegistrations={dashboard.batchPrintableRegistrations} selectedBatchIds={selectedBatchIds} setSelectedBatchIds={setSelectedBatchIds} permissions={{ ...permissions, canRegisterPatientContact, canRegisterPickup }} onOpenDetails={(reg) => setModal({ detailReg: reg })} onResolveIssue={(reg) => openEdit(reg)} onApprove={(reg) => requestWorkflow('approve', reg)} onIssue={(reg) => requestWorkflow('issue', reg)} onNotify={(reg, template) => setModal({ whatsAppDraft: { reg, template, message: buildWhatsAppMessage(reg, template) } })} onRegisterNotice={(reg) => workflow.notifyPatient(reg, 'Aviso registrado manualmente')} onPickup={(reg) => setModal({ pickupDraft: { reg, pickedBy: '', documentChecked: false, note: '' } })} onBatchPrint={batchPrint} showDocumentIssues={false} />
       <DashboardModals modal={modal} setModal={setModal} editForm={editForm} updateEditField={updateEditField} saveEdit={saveEdit} isSavingEdit={isSavingEdit} historyFilter={historyFilter} setHistoryFilter={setHistoryFilter} filteredHistoryEntries={filteredHistoryEntries} internalNote={internalNote} setInternalNote={setInternalNote} onAddInternalNote={() => modal.detailReg && workflow.addInternalNote(modal.detailReg, internalNote).then(() => setInternalNote(''))} onCopySummary={copySummary} onResolveIssue={openEdit} onWorkflow={requestWorkflow} onOpenHistory={openHistory} onOpenDocumentFile={openDocumentFile} onConfirmWhatsApp={confirmWhatsApp} onConfirmPickup={confirmPickup} onConfirmAction={confirmAction} onPreviewPrint={(reg) => requestWorkflow('issue', reg)} previewPhotoUri={previewPhotoUri} isPreviewLoading={isPreviewLoading} permissions={permissions} />
     </div>

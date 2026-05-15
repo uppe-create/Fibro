@@ -10,6 +10,7 @@ import {
   buildWhatsAppMessage,
   buildWhatsAppUrl,
   formatCpf,
+  formatCpfByPermission,
   getChecklistItems,
   getDocumentIssues,
   getNextOperationalAction,
@@ -64,6 +65,7 @@ type Props = {
     canCancelRegistration: boolean;
     canRenewRegistration: boolean;
     canReissueRegistration: boolean;
+    canViewFullCpf: boolean;
   };
 };
 
@@ -147,7 +149,7 @@ function DetailModal(props: Props & { reg: CIPFRegistration }) {
         )}
         <div className="grid gap-3 sm:grid-cols-2">
           {[
-            ['CPF', formatCpf(reg.cpf)],
+            ['CPF', formatCpfByPermission(reg.cpf, props.permissions.canViewFullCpf)],
             ['Cartao SUS', reg.cns ? formatCNS(reg.cns) : 'Nao informado'],
             ['Telefone', reg.phone ? formatPhone(reg.phone) : '-'],
             ['CID', reg.cid || '-'],

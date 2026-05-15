@@ -7,6 +7,7 @@ import {
   FileWarning,
   Home,
   IdCard,
+  LockKeyhole,
   PackageCheck,
   Settings,
   Shield,
@@ -59,6 +60,7 @@ const INTERNAL_SECTIONS: InternalSection[] = [
     items: [
       { value: 'relatorios', label: 'Relatorios', icon: ClipboardList, permission: 'viewReports' },
       { value: 'auditoria', label: 'Auditoria', icon: Activity, permission: 'viewAudit' },
+      { value: 'governanca', label: 'LGPD', icon: LockKeyhole, permission: 'viewGovernance' },
       { value: 'configuracoes', label: 'Configuracoes', icon: Settings, permission: 'viewSettings' }
     ]
   }

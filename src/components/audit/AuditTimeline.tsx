@@ -1,5 +1,6 @@
 import { AlertTriangle, CalendarClock, Eye, FileStack, Fingerprint, ShieldCheck, UserCircle2 } from 'lucide-react';
 import { AUDIT_CATEGORY_LABELS, AUDIT_SEVERITY_LABELS, type AuditCategory, type AuditSeverity, type AuditTimelineEntry } from '@/lib/audit-events';
+import { EmptyState } from '@/components/ui/layout';
 
 const categoryIcon: Record<AuditCategory, typeof ShieldCheck> = {
   auth: ShieldCheck,
@@ -35,7 +36,7 @@ export function AuditTimeline({
   compact?: boolean;
 }) {
   if (!entries.length) {
-    return <div className="cipf-empty text-sm">{emptyMessage}</div>;
+    return <EmptyState title="Nada encontrado" description={emptyMessage} icon={<Eye className="h-5 w-5" />} className="text-sm" />;
   }
 
   return (

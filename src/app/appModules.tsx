@@ -16,6 +16,7 @@ const loadConfiguracoes = () => import('@/modules/Configuracoes').then((module) 
 const loadDashboard = () => import('@/modules/Dashboard').then((module) => ({ default: module.Dashboard }));
 const loadDevTools = () => import('@/modules/DevTools').then((module) => ({ default: module.DevTools }));
 const loadDocumentos = () => import('@/modules/Documentos').then((module) => ({ default: module.Documentos }));
+const loadGovernanca = () => import('@/modules/Governanca').then((module) => ({ default: module.Governanca }));
 const loadHome = () => import('@/modules/Home').then((module) => ({ default: module.Home }));
 const loadOperacao = () => import('@/modules/Operacao').then((module) => ({ default: module.Operacao }));
 const loadPessoas = () => import('@/modules/Pessoas').then((module) => ({ default: module.Pessoas }));
@@ -35,6 +36,7 @@ export const Configuracoes = React.lazy(loadConfiguracoes);
 export const Dashboard = React.lazy(loadDashboard);
 export const DevTools = React.lazy(loadDevTools);
 export const Documentos = React.lazy(loadDocumentos);
+export const Governanca = React.lazy(loadGovernanca);
 export const Home = React.lazy(loadHome);
 export const Operacao = React.lazy(loadOperacao);
 export const Pessoas = React.lazy(loadPessoas);
@@ -60,6 +62,7 @@ export function preloadAppModules() {
     loadRelatorios(),
     loadAuditoria(),
     loadDocumentos(),
+    loadGovernanca(),
     loadRetiradas(),
     loadCadastro(),
     loadCarteirinha(),

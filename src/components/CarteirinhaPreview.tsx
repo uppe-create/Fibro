@@ -37,7 +37,7 @@ function formatCpf(cpf: string) {
 function getSusNumber(registration: CIPFRegistration) {
   const extraData = registration as CIPFRegistration & { cns?: string; cartaoSus?: string; sus?: string };
   const rawNumber = extraData.cns || extraData.cartaoSus || extraData.sus || '';
-  return rawNumber ? formatCNS(rawNumber) : 'Não informado';
+  return rawNumber ? formatCNS(rawNumber) : 'Nao informado';
 }
 
 function Field({ label, value, className = '' }: { label: string; value?: string; className?: string }) {
@@ -67,7 +67,7 @@ export const CarteirinhaPreview = forwardRef<HTMLDivElement, CarteirinhaPreviewP
     return (
       <div ref={ref} className="flex flex-col gap-6 bg-white p-3 print-clean">
         <div
-          className={`${CARD_SIZE} cipf-print-exact print-clean relative flex overflow-hidden border border-[#9fb3c8] bg-[#f8fbfd] shadow-lg print:mx-auto print:mb-[1cm] print:border-gray-400 print:shadow-none`}
+          className={`${CARD_SIZE} cipf-print-exact print-clean relative flex overflow-hidden rounded-[0.18cm] border border-slate-300 bg-slate-50 shadow-[0_12px_28px_rgba(15,23,42,0.08)] print:mx-auto print:mb-[1cm] print:rounded-none print:border-gray-400 print:shadow-none`}
         >
           <div className="absolute inset-x-0 top-0 h-2 bg-[linear-gradient(90deg,#155c9c_0%,#155c9c_42%,#1f8a58_42%,#1f8a58_76%,#f2c94c_76%,#f2c94c_100%)]" />
           <div className="absolute bottom-0 left-0 top-2 w-[0.42cm] bg-[#155c9c]" />
@@ -135,7 +135,7 @@ export const CarteirinhaPreview = forwardRef<HTMLDivElement, CarteirinhaPreviewP
 
                 <div className="grid grid-cols-2 gap-1">
                   <Field label="CPF" value={formatCpf(registration.cpf)} />
-                  <Field label="Cartão SUS" value={getSusNumber(registration)} />
+                  <Field label="Cartao SUS" value={getSusNumber(registration)} />
                 </div>
 
                 <div className="border border-[#cbd8e3] bg-[#f6fafc] px-1.5 py-1">
@@ -148,7 +148,7 @@ export const CarteirinhaPreview = forwardRef<HTMLDivElement, CarteirinhaPreviewP
                 <div className="border-l-4 border-[#f2c94c] bg-[#fff8dc] px-1.5 py-1">
                   <p className="flex items-center gap-1 text-[5.3px] font-bold leading-[1.15] text-[#4a3a08]">
                     <Stamp className="h-2 w-2 shrink-0" />
-                    Atendimento prioritário. Datas de emissão e validade no verso.
+                    Atendimento prioritario. Datas de emissao e validade no verso.
                   </p>
                 </div>
               </div>
@@ -165,10 +165,10 @@ export const CarteirinhaPreview = forwardRef<HTMLDivElement, CarteirinhaPreviewP
         </div>
 
         <div
-          className={`${CARD_SIZE} cipf-print-exact print-clean relative flex flex-col overflow-hidden border border-[#9fb3c8] bg-white shadow-lg print:mx-auto print:border-gray-400 print:shadow-none`}
+          className={`${CARD_SIZE} cipf-print-exact print-clean relative flex flex-col overflow-hidden rounded-[0.18cm] border border-slate-300 bg-white shadow-[0_12px_28px_rgba(15,23,42,0.08)] print:mx-auto print:rounded-none print:border-gray-400 print:shadow-none`}
         >
           <div className="h-[0.72cm] bg-[linear-gradient(90deg,#17324d_0%,#155c9c_55%,#1f8a58_100%)] px-4 py-2 text-white">
-            <p className="text-[8px] font-black uppercase">Validação digital da CIPF</p>
+            <p className="text-[8px] font-black uppercase">Validacao digital da CIPF</p>
             <p className="text-[5px] font-semibold uppercase opacity-85">Documento pessoal e intransferivel</p>
           </div>
 
@@ -183,7 +183,7 @@ export const CarteirinhaPreview = forwardRef<HTMLDivElement, CarteirinhaPreviewP
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
-                  <Field label="Emissão" value={registration.issueDate} />
+                  <Field label="Emissao" value={registration.issueDate} />
                   <Field label="Validade" value={registration.expiryDate} />
                 </div>
 
@@ -199,7 +199,7 @@ export const CarteirinhaPreview = forwardRef<HTMLDivElement, CarteirinhaPreviewP
               <div className="border-l-4 border-[#f2c94c] bg-[#fff8dc] p-2">
                 <p className="flex items-start gap-1 text-[6px] font-bold leading-[1.35] text-[#4a3a08]">
                   <ShieldCheck className="mt-0.5 h-2.5 w-2.5 shrink-0" />
-                  Apresente esta carteira para identificação e validação de prioridade, conforme legislação municipal vigente.
+                  Apresente esta carteira para identificacao e validacao de prioridade, conforme legislacao municipal vigente.
                 </p>
               </div>
             </div>

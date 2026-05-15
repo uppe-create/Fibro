@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 import { logAuditEvent } from '@/lib/audit';
+import { archiveDatabaseSecure, isSecureAdminBackendEnabled } from '@/lib/admin-rpc';
 import { buildAuditEvent, type AuditEventInput } from '@/lib/audit-events';
 import { hasPermission, normalizeRole, type UserRole } from '@/lib/permissions';
 import type { RegistrationStatus } from '@/lib/registration-status';
@@ -295,6 +296,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       'retiradas',
       'relatorios',
       'auditoria',
+      'governanca',
       'configuracoes',
       'dev'
     ].includes(path) ? ({ valida: 'validar', cadastros: 'pessoas' } as Record<string, string>)[path] || path : 'inicio';
@@ -592,6 +594,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { currentUser } = get();
     if (!hasPermission(currentUser, 'clearDatabase')) {
       throw new Error('Apenas administradores podem arquivar a base.');
+    }
+
+    if (isSecureAdminBackendEnabled()) {
+      await archiveDatabaseSecure('Arquivamento administrativo da base');
+      set({ registrations: [] });
+      return;
     }
 
     assertSupabaseConfigured();

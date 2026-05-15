@@ -23,7 +23,11 @@ export type Permission =
   | 'exportDashboard'
   | 'clearDatabase'
   | 'viewDocuments'
+  | 'viewSensitiveDocuments'
+  | 'viewFullCpf'
+  | 'editWorkflowMetadata'
   | 'viewHistory'
+  | 'viewGovernance'
   | 'viewSettings'
   | 'useDevTools';
 
@@ -53,16 +57,27 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'exportDashboard',
     'clearDatabase',
     'viewDocuments',
+    'viewSensitiveDocuments',
+    'viewFullCpf',
+    'editWorkflowMetadata',
     'viewHistory',
+    'viewGovernance',
     'viewSettings',
     'useDevTools'
   ],
   attendant: [
+    'viewOperations',
     'viewDashboard',
     'viewPeople',
+    'viewDocumentsQueue',
+    'viewPickupQueue',
     'createRegistration',
     'editRegistration',
+    'approveRegistration',
+    'renewRegistration',
     'viewDocuments',
+    'viewSensitiveDocuments',
+    'editWorkflowMetadata',
     'viewHistory',
     'viewSettings'
   ],
@@ -105,6 +120,7 @@ export function canAccessTab(user: UserLike, tab: string): boolean {
   if (tab === 'retiradas') return hasPermission(user, 'viewPickupQueue');
   if (tab === 'relatorios') return hasPermission(user, 'viewReports');
   if (tab === 'auditoria') return hasPermission(user, 'viewAudit');
+  if (tab === 'governanca') return hasPermission(user, 'viewGovernance');
   if (tab === 'configuracoes') return hasPermission(user, 'viewSettings');
   if (tab === 'dev') return hasPermission(user, 'useDevTools');
   return false;
