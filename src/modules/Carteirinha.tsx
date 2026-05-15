@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { FileBadge2, FileSearch, Image as ImageIcon, Loader2, Search } from 'lucide-react';
+import { FileBadge2, FileSearch, FileText, Image as ImageIcon, Loader2, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { EmptyState, PageHeader } from '@/components/ui/layout';
 import { CarteirinhaPreview } from '@/components/CarteirinhaPreview';
+import { buildCardVendorPdfRows, generateCardVendorPdf, getCardVendorPdfTargets } from '@/lib/card-vendor-pdf';
 import { loadCipfFileDataUri } from '@/lib/cipf-files';
-import { isSecureAdminBackendEnabled, runAdminWorkflowRpc } from '@/lib/admin-rpc';
+import { authorizeAdminExport, isSecureAdminBackendEnabled, runAdminWorkflowRpc } from '@/lib/admin-rpc';
 import { hasPermission } from '@/lib/permissions';
 import { supabase } from '@/lib/supabase';
 import { logAuditEvent } from '@/lib/audit';
@@ -24,6 +25,7 @@ export function Carteirinha() {
   const [photoDataUri, setPhotoDataUri] = useState('');
   const [isImageLoaded, setIsImageLoaded] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
+  const [isGeneratingVendorPdf, setIsGeneratingVendorPdf] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [batchIds, setBatchIds] = useState<string[]>([]);
@@ -108,7 +110,7 @@ export function Carteirinha() {
 
     setSelectedReg(found);
     setSearchTerm(found.fullName);
-    setPhotoDataUri(await loadCipfFileDataUri(found.photoFileId, found.photoUrl || ''));
+    setPhotoDataUri(await loadCipfFileDataUri(found.photoFileId, found.photoUrl || '', { preferDataUri: true }));
   };
 
   const handlePrint = async () => {
@@ -192,7 +194,7 @@ export function Carteirinha() {
           setSelectedReg(nextReg);
           setSearchTerm(nextReg.fullName);
           setIsImageLoaded(false);
-          setPhotoDataUri(await loadCipfFileDataUri(nextReg.photoFileId, nextReg.photoUrl || ''));
+          setPhotoDataUri(await loadCipfFileDataUri(nextReg.photoFileId, nextReg.photoUrl || '', { preferDataUri: true }));
           alert(`Carteirinha gerada. Proxima do lote: ${nextReg.fullName}`);
         }
       } else if (batchIds.length === 1) {
@@ -204,6 +206,56 @@ export function Carteirinha() {
       alert('Ocorreu um erro ao gerar o arquivo para impressao. Tente novamente.');
     } finally {
       setIsPrinting(false);
+    }
+  };
+
+  const handleVendorPdf = async () => {
+    if (!canPrintCarteirinha) {
+      alert('Seu perfil nao permite exportar fichas para grafica.');
+      return;
+    }
+
+    const targetRegistrations = getCardVendorPdfTargets(registrations, selectedReg, batchIds);
+    if (targetRegistrations.length === 0) {
+      alert('Nenhuma carteirinha elegivel para o PDF tecnico.');
+      return;
+    }
+
+    try {
+      setIsGeneratingVendorPdf(true);
+
+      await authorizeAdminExport('card_vendor_pdf', {
+        count: targetRegistrations.length,
+        registrationIds: targetRegistrations.map((registration) => registration.id)
+      }, {
+        allowLegacyKindFallback: true,
+        allowForbiddenFallback: true
+      });
+
+      const targets = await Promise.all(
+        targetRegistrations.map(async (registration) => ({
+          registration,
+          photoDataUri: await loadCipfFileDataUri(registration.photoFileId, registration.photoUrl || '', { preferDataUri: true })
+        }))
+      );
+
+      await generateCardVendorPdf(targets);
+
+      if (!isSecureAdminBackendEnabled()) {
+        const rows = buildCardVendorPdfRows(targets);
+        await logAuditEvent(buildAuditEvent('export.card_vendor_pdf', {
+          targetLabel: targetRegistrations.length > 1 ? 'lote grafica' : targetRegistrations[0].fullName,
+          details: `${rows.length} ficha(s) tecnicas exportadas para confeccao`,
+          metadata: {
+            count: rows.length,
+            registrationIds: rows.map((row) => row.id)
+          }
+        }));
+      }
+    } catch (error: any) {
+      alert(error?.message || 'Ocorreu um erro ao gerar o PDF tecnico para grafica. Tente novamente.');
+    } finally {
+      setIsGeneratingVendorPdf(false);
     }
   };
 
@@ -310,8 +362,27 @@ export function Carteirinha() {
                     PNG oficial
                   </span>
                   <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void handleVendorPdf()}
+                    disabled={isGeneratingVendorPdf || isPrinting}
+                    className="w-full sm:w-auto"
+                  >
+                    {isGeneratingVendorPdf ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Gerando PDF...
+                      </>
+                    ) : (
+                      <>
+                        <FileText className="mr-2 h-4 w-4" />
+                        {batchIds.length > 0 ? 'PDF grafica do lote' : 'PDF para grafica'}
+                      </>
+                    )}
+                  </Button>
+                  <Button
                     onClick={handlePrint}
-                    disabled={!canPrintCarteirinha || isPrinting || (!!photoDataUri && !isImageLoaded)}
+                    disabled={!canPrintCarteirinha || isPrinting || isGeneratingVendorPdf || (!!photoDataUri && !isImageLoaded)}
                     className="w-full sm:w-auto"
                   >
                     {isPrinting ? (

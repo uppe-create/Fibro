@@ -1,59 +1,57 @@
 ﻿import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { LockKeyhole, LogOut, Search, ShieldCheck, UnlockKeyhole } from 'lucide-react';
+import { LogOut, Search, ShieldCheck } from 'lucide-react';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Notifications } from '@/components/Notifications';
-import {
-  getSessionSecurityConfig,
-  SESSION_ACTIVITY_STORAGE_KEY,
-  SESSION_LOGIN_AT_STORAGE_KEY,
-  useAppStore
-} from '@/store/useAppStore';
-import { canAccessTab, getDefaultTabForRole, getRoleLabel } from '@/lib/permissions';
+import { getSessionSecurityConfig, SESSION_ACTIVITY_STORAGE_KEY, SESSION_LOGIN_AT_STORAGE_KEY, useAppStore } from '@/store/useAppStore';
+import { canAccessPublicTab, canAccessTab, getDefaultTabForRole, getRoleLabel } from '@/lib/permissions';
 import { InternalNavigation } from '@/app/InternalNavigation';
 import { PublicRoutes } from '@/app/PublicRoutes';
-import { APP_NAME, APP_VERSION, AUTH_MODE, IS_PRODUCTION, preloadAppModules, SESSION_CHECK_INTERVAL_MS } from '@/app/appModules';
+import { APP_NAME, APP_VERSION, AUTH_MODE, IS_PRODUCTION, SESSION_CHECK_INTERVAL_MS, preloadLikelyInternalModules } from '@/app/appModules';
 import { getProductionAuthError } from '@/lib/auth-mode';
+import { installGlobalClientDiagnostics } from '@/lib/runtime-compat';
 import { MfaChallenge } from '@/modules/MfaChallenge';
 
 const PEOPLE_SEARCH_STORAGE_KEY = 'cipf_people_search';
 const PUBLIC_HOME_SECTION_STORAGE_KEY = 'cipf_public_home_section';
 
 export function AppShell() {
-  const { currentUser, isSessionLocked, lockSession, unlockSession, logout, activeTab, setActiveTab, logAudit, initializeAuth, mfaChallenge } = useAppStore();
+  const { currentUser, logout, activeTab, setActiveTab, logAudit, initializeAuth, mfaChallenge } = useAppStore();
   const { idleTimeoutMs, maxSessionMs } = getSessionSecurityConfig();
   const [globalSearch, setGlobalSearch] = useState('');
-  const [unlockError, setUnlockError] = useState('');
-  const [isUnlocking, setIsUnlocking] = useState(false);
   const previousUserIdRef = useRef<string | null>(null);
+  const diagnosticsContextRef = useRef({ activeTab: 'inicio', role: 'public' });
   const productionAuthError = getProductionAuthError((import.meta as any).env || {}, IS_PRODUCTION);
+  const isStandalonePublicPage = (activeTab === 'inicio' || activeTab === 'validar') && !currentUser;
+  const hideGlobalPublicHeader = !currentUser && ['privacidade', 'termos', 'contato'].includes(activeTab);
+  const hideGlobalPublicFooter = !currentUser && ['privacidade', 'termos', 'contato'].includes(activeTab);
+  const isPublicShell = !currentUser;
+  const isAdminBlockedByMfa = currentUser?.accessNotice === 'admin_mfa_required' && currentUser.role === 'viewer';
+
+  diagnosticsContextRef.current = {
+    activeTab,
+    role: currentUser?.role || 'public'
+  };
 
   useEffect(() => {
     document.title = APP_NAME;
   }, []);
+
+  useEffect(() => installGlobalClientDiagnostics(() => diagnosticsContextRef.current), []);
 
   useEffect(() => {
     void initializeAuth();
   }, [initializeAuth]);
 
   useEffect(() => {
-    const preloadModules = () => {
-      void preloadAppModules();
-    };
-
-    const idleCallback = (window as any).requestIdleCallback as undefined | ((callback: () => void) => number);
-    if (idleCallback) {
-      const handle = idleCallback(preloadModules);
-      return () => (window as any).cancelIdleCallback?.(handle);
-    }
-
-    const timeout = window.setTimeout(preloadModules, 800);
-    return () => window.clearTimeout(timeout);
-  }, []);
-
-  useEffect(() => {
     if (IS_PRODUCTION && activeTab === 'dev') {
       setActiveTab('configuracoes');
+      return;
+    }
+    if (!currentUser) {
+      if (!canAccessPublicTab(activeTab)) {
+        setActiveTab('configuracoes');
+      }
       return;
     }
     if (!currentUser || canAccessTab(currentUser, activeTab)) return;
@@ -74,13 +72,30 @@ export function AppShell() {
     previousUserIdRef.current = currentUser?.id || null;
   }, [activeTab, currentUser, setActiveTab]);
 
+  useEffect(() => {
+    if (!currentUser) return;
+    const preload = () => {
+      void preloadLikelyInternalModules(currentUser.role);
+    };
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      const idleId = (window as Window & { requestIdleCallback: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number })
+        .requestIdleCallback(() => preload(), { timeout: 2200 });
+      return () =>
+        (window as Window & { cancelIdleCallback?: (handle: number) => void }).cancelIdleCallback?.(idleId);
+    }
+
+    const timeoutId = globalThis.setTimeout(preload, 1500);
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [currentUser]);
+
   const resetTimer = useCallback(() => {
-    if (!currentUser || isSessionLocked) return;
+    if (!currentUser) return;
     localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
-  }, [currentUser, isSessionLocked]);
+  }, [currentUser]);
 
   useEffect(() => {
-    if (!currentUser || isSessionLocked) return;
+    if (!currentUser) return;
 
     let expired = false;
     resetTimer();
@@ -119,7 +134,7 @@ export function AppShell() {
       clearInterval(interval);
       activityEvents.forEach((eventName) => window.removeEventListener(eventName, resetTimer));
     };
-  }, [currentUser, isSessionLocked, idleTimeoutMs, maxSessionMs, logout, logAudit, resetTimer]);
+  }, [currentUser, idleTimeoutMs, maxSessionMs, logout, logAudit, resetTimer]);
 
   const submitGlobalSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -127,18 +142,6 @@ export function AppShell() {
     if (!query) return;
     sessionStorage.setItem(PEOPLE_SEARCH_STORAGE_KEY, query);
     setActiveTab('pessoas');
-  };
-
-  const handleUnlock = async () => {
-    setUnlockError('');
-    setIsUnlocking(true);
-    try {
-      await unlockSession();
-    } catch (error: any) {
-      setUnlockError(error?.message || 'Sessao expirada. Entre novamente.');
-    } finally {
-      setIsUnlocking(false);
-    }
   };
 
   if (productionAuthError) {
@@ -154,50 +157,12 @@ export function AppShell() {
     );
   }
 
-  if (currentUser && isSessionLocked) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#fbfafc] px-4 text-[#251832]">
-        <div className="w-full max-w-md rounded-xl border border-[#e9e0f0] bg-white p-6 shadow-[0_18px_50px_rgba(47,20,80,0.10)]">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--fibro-purple)] text-white">
-              <LockKeyhole className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#876d9f]">Sessao bloqueada</p>
-              <h1 className="truncate text-xl font-black text-[#170b24]">{currentUser.name}</h1>
-            </div>
-          </div>
-          <p className="mt-4 text-sm leading-6 text-[#617184]">
-            Sessao Supabase preservada neste navegador. Desbloqueio nao pede MFA enquanto `aal2` continuar valido.
-          </p>
-          {unlockError ? <div className="mt-4 rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-700">{unlockError}</div> : null}
-          <div className="mt-6 grid gap-3">
-            <Button type="button" onClick={() => void handleUnlock()} disabled={isUnlocking} className="h-12 rounded-lg">
-              <UnlockKeyhole className="mr-2 h-4 w-4" />
-              {isUnlocking ? 'Desbloqueando...' : 'Desbloquear'}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => void logout()} className="h-11 rounded-lg">
-              <LogOut className="mr-2 h-4 w-4" />
-              Sair definitivo
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const initials = currentUser?.name
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0])
     .join('');
-  const isStandalonePublicPage = (activeTab === 'inicio' || activeTab === 'validar') && !currentUser;
-  const hideGlobalPublicHeader = !currentUser && ['privacidade', 'termos', 'contato'].includes(activeTab);
-  const hideGlobalPublicFooter = !currentUser && ['privacidade', 'termos', 'contato'].includes(activeTab);
-  const isPublicShell = !currentUser;
-  const isAdminBlockedByMfa = currentUser?.accessNotice === 'admin_mfa_required' && currentUser.role === 'viewer';
-
   useEffect(() => {
     if (!isAdminBlockedByMfa) return;
     if (activeTab === 'configuracoes') return;
@@ -284,15 +249,6 @@ export function AppShell() {
                     Teste
                   </span>
                 )}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => void lockSession()}
-                  className="h-10 w-10 rounded-md text-[#6f617b] hover:bg-[#f8f5fb] hover:text-[var(--fibro-purple)]"
-                  title="Bloquear"
-                >
-                  <LockKeyhole className="h-5 w-5" />
-                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

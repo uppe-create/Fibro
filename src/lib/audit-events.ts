@@ -87,6 +87,7 @@ const AUDIT_EVENT_DEFINITIONS: Record<string, AuditEventDefinition> = {
   'export.dashboard_csv': { eventCode: 'export.dashboard_csv', category: 'export', severity: 'sensitive', targetType: 'system', summary: 'Exportacao CSV do dashboard' },
   'export.dashboard_pdf': { eventCode: 'export.dashboard_pdf', category: 'export', severity: 'sensitive', targetType: 'system', summary: 'Exportacao PDF do dashboard' },
   'export.monthly_pdf': { eventCode: 'export.monthly_pdf', category: 'export', severity: 'sensitive', targetType: 'system', summary: 'Relatorio mensal PDF exportado' },
+  'export.card_vendor_pdf': { eventCode: 'export.card_vendor_pdf', category: 'export', severity: 'sensitive', targetType: 'system', summary: 'PDF tecnico da grafica exportado' },
   'system.backup_downloaded': { eventCode: 'system.backup_downloaded', category: 'system', severity: 'sensitive', targetType: 'system', summary: 'Backup guiado baixado' },
   'system.database_archived': { eventCode: 'system.database_archived', category: 'system', severity: 'warning', targetType: 'system', summary: 'Base arquivada logicamente' }
 };
@@ -114,6 +115,7 @@ const LEGACY_EVENT_MAP: Record<string, string> = {
   'exportacao csv dashboard': 'export.dashboard_csv',
   'exportacao pdf dashboard': 'export.dashboard_pdf',
   'relatorio mensal pdf': 'export.monthly_pdf',
+  'pdf tecnico grafica': 'export.card_vendor_pdf',
   'backup guiado baixado': 'system.backup_downloaded',
   'backup json exportado': 'system.backup_downloaded',
   'arquivamento geral': 'system.database_archived'

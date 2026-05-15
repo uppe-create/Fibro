@@ -1,9 +1,9 @@
-﻿import React, { Component, Suspense, useEffect, useState } from 'react';
+import React, { Component, Suspense, useEffect, useState } from 'react';
 import { Loader2, ShieldCheck } from 'lucide-react';
-import { TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Login } from '@/modules/Login';
 import { hasPermission, type Permission } from '@/lib/permissions';
+import { logClientDiagnostic } from '@/lib/runtime-compat';
 import { useAppStore } from '@/store/useAppStore';
 import {
   Cadastro,
@@ -45,6 +45,12 @@ class AppErrorBoundary extends (Component as any) {
 
   static getDerivedStateFromError() {
     return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    logClientDiagnostic('module-error-boundary', error?.message || 'Falha ao abrir modulo', {
+      resetKey: this.props.resetKey
+    });
   }
 
   componentDidUpdate(previousProps: AppErrorBoundaryProps) {
@@ -99,7 +105,7 @@ function ProtectedRoute({
   if (!isAuthReady) {
     return (
       <div className="flex flex-col items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 animate-spin text-[#155c9c]" />
+        <Loader2 className="h-8 w-8 animate-spin text-[#155c9c]" />
       </div>
     );
   }
@@ -136,6 +142,7 @@ function ProtectedRoute({
 
 export function PublicRoutes({ activeTab }: { activeTab: string }) {
   const currentUser = useAppStore((state) => state.currentUser);
+  const isPublicUser = !currentUser;
   const isStandalonePublicPage = (activeTab === 'inicio' || activeTab === 'validar') && !currentUser;
   const [renderedPublicTab, setRenderedPublicTab] = useState(activeTab === 'validar' ? 'validar' : 'inicio');
   const [publicTransitionPhase, setPublicTransitionPhase] = useState<'enter' | 'exit'>('enter');
@@ -163,125 +170,149 @@ export function PublicRoutes({ activeTab }: { activeTab: string }) {
     return <Home />;
   };
 
+  const renderPublicOnlyRoute = () => {
+    switch (activeTab) {
+      case 'inicio':
+        return <Home />;
+      case 'validar':
+        return <Valida />;
+      case 'acessibilidade':
+        return <Acessibilidade />;
+      case 'suporte':
+        return <Suporte />;
+      case 'privacidade':
+        return <Privacidade />;
+      case 'termos':
+        return <Termos />;
+      case 'contato':
+        return <Contato />;
+      case 'configuracoes':
+        return (
+          <ProtectedRoute permission="viewSettings" deniedMessage="Este perfil nao acessa configuracoes do sistema.">
+            <Configuracoes />
+          </ProtectedRoute>
+        );
+      default:
+        return <Home />;
+    }
+  };
+
+  const renderInternalOnlyRoute = () => {
+    switch (activeTab) {
+      case 'inicio':
+        return <InternalHome />;
+      case 'acessibilidade':
+        return <Acessibilidade />;
+      case 'suporte':
+        return <Suporte />;
+      case 'privacidade':
+        return <Privacidade />;
+      case 'termos':
+        return <Termos />;
+      case 'contato':
+        return <Contato />;
+      case 'validar':
+        return <Valida />;
+      case 'carteirinha':
+        return (
+          <ProtectedRoute permission="viewCarteirinha">
+            <Carteirinha />
+          </ProtectedRoute>
+        );
+      case 'cadastro':
+        return (
+          <ProtectedRoute permission="createRegistration" deniedMessage="Apenas administradores e atendentes podem cadastrar pessoas.">
+            <Cadastro />
+          </ProtectedRoute>
+        );
+      case 'dashboard':
+        return (
+          <ProtectedRoute permission="viewDashboard" deniedMessage="Este perfil pode consultar carteirinhas, mas nao acessa o dashboard administrativo.">
+            <Dashboard />
+          </ProtectedRoute>
+        );
+      case 'pessoas':
+        return (
+          <ProtectedRoute permission="viewPeople" deniedMessage="Este perfil nao acessa a lista interna de pessoas.">
+            <Pessoas />
+          </ProtectedRoute>
+        );
+      case 'operacao':
+        return (
+          <ProtectedRoute permission="viewOperations" deniedMessage="Este perfil nao acessa a fila operacional.">
+            <Operacao />
+          </ProtectedRoute>
+        );
+      case 'documentos':
+        return (
+          <ProtectedRoute permission="viewDocumentsQueue" deniedMessage="Este perfil nao acessa a fila documental.">
+            <Documentos />
+          </ProtectedRoute>
+        );
+      case 'retiradas':
+        return (
+          <ProtectedRoute permission="viewPickupQueue" deniedMessage="Este perfil nao acessa a fila de retiradas.">
+            <Retiradas />
+          </ProtectedRoute>
+        );
+      case 'relatorios':
+        return (
+          <ProtectedRoute permission="viewReports" deniedMessage="Apenas administradores acessam relatorios e exportacoes.">
+            <Relatorios />
+          </ProtectedRoute>
+        );
+      case 'auditoria':
+        return (
+          <ProtectedRoute permission="viewAudit" deniedMessage="Apenas administradores acessam a auditoria do sistema.">
+            <Auditoria />
+          </ProtectedRoute>
+        );
+      case 'governanca':
+        return (
+          <ProtectedRoute permission="viewGovernance" deniedMessage="Somente administradores acessam governanca LGPD e incidente.">
+            <Governanca />
+          </ProtectedRoute>
+        );
+      case 'configuracoes':
+        return (
+          <ProtectedRoute permission="viewSettings" deniedMessage="Este perfil nao acessa configuracoes do sistema.">
+            <Configuracoes />
+          </ProtectedRoute>
+        );
+      case 'dev':
+        return IS_PRODUCTION ? null : (
+          <ProtectedRoute permission="useDevTools" deniedMessage="Apenas administradores podem acessar ferramentas de desenvolvimento.">
+            <DevTools />
+          </ProtectedRoute>
+        );
+      default:
+        return <InternalHome />;
+    }
+  };
+
+  if (isPublicUser) {
+    return (
+      <main className={isStandalonePublicPage ? 'w-full flex-1' : 'mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:py-6'}>
+        <div className={isStandalonePublicPage ? '' : 'animate-in fade-in slide-in-from-bottom-4 duration-500'}>
+          <AppErrorBoundary resetKey={activeTab}>
+            <Suspense fallback={<ModuleFallback />}>
+              {isStandalonePublicPage ? (
+                <div className={publicTransitionPhase === 'exit' ? 'opacity-0' : ''}>{renderPublicPage()}</div>
+              ) : (
+                renderPublicOnlyRoute()
+              )}
+            </Suspense>
+          </AppErrorBoundary>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className={isStandalonePublicPage ? 'w-full flex-1' : currentUser ? 'min-w-0 flex-1' : 'mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:py-6'}>
+    <main className="min-w-0 flex-1">
       <div className={isStandalonePublicPage ? '' : 'animate-in fade-in slide-in-from-bottom-4 duration-500'}>
         <AppErrorBoundary resetKey={activeTab}>
-          <Suspense fallback={<ModuleFallback />}>
-            {isStandalonePublicPage ? (
-              <div
-                className={`public-shell-transition ${
-                  publicTransitionPhase === 'exit' ? 'public-shell-transition--exit' : 'public-shell-transition--enter'
-                }`}
-              >
-                {renderPublicPage()}
-              </div>
-            ) : (
-              <TabsContent value="inicio" className="mt-0 outline-none">
-                {currentUser ? <InternalHome /> : <Home />}
-              </TabsContent>
-            )}
-
-            <TabsContent value="acessibilidade" className="mt-0 outline-none">
-              <Acessibilidade />
-            </TabsContent>
-
-            <TabsContent value="suporte" className="mt-0 outline-none">
-              <Suporte />
-            </TabsContent>
-
-            <TabsContent value="privacidade" className="mt-0 outline-none">
-              <Privacidade />
-            </TabsContent>
-
-            <TabsContent value="termos" className="mt-0 outline-none">
-              <Termos />
-            </TabsContent>
-
-            <TabsContent value="contato" className="mt-0 outline-none">
-              <Contato />
-            </TabsContent>
-
-            {!isStandalonePublicPage && (
-              <TabsContent value="validar" className="mt-0 outline-none">
-                <Valida />
-              </TabsContent>
-            )}
-
-            <TabsContent value="carteirinha" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewCarteirinha">
-                <Carteirinha />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="cadastro" className="mt-0 outline-none">
-              <ProtectedRoute permission="createRegistration" deniedMessage="Apenas administradores e atendentes podem cadastrar pessoas.">
-                <Cadastro />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="dashboard" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewDashboard" deniedMessage="Este perfil pode consultar carteirinhas, mas nao acessa o dashboard administrativo.">
-                <Dashboard />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="pessoas" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewPeople" deniedMessage="Este perfil nao acessa a lista interna de pessoas.">
-                <Pessoas />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="operacao" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewOperations" deniedMessage="Este perfil nao acessa a fila operacional.">
-                <Operacao />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="documentos" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewDocumentsQueue" deniedMessage="Este perfil nao acessa a fila documental.">
-                <Documentos />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="retiradas" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewPickupQueue" deniedMessage="Este perfil nao acessa a fila de retiradas.">
-                <Retiradas />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="relatorios" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewReports" deniedMessage="Apenas administradores acessam relatorios e exportacoes.">
-                <Relatorios />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="auditoria" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewAudit" deniedMessage="Apenas administradores acessam a auditoria do sistema.">
-                <Auditoria />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="governanca" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewGovernance" deniedMessage="Somente administradores acessam governanca LGPD e incidente.">
-                <Governanca />
-              </ProtectedRoute>
-            </TabsContent>
-
-            <TabsContent value="configuracoes" className="mt-0 outline-none">
-              <ProtectedRoute permission="viewSettings" deniedMessage="Este perfil nao acessa configuracoes do sistema.">
-                <Configuracoes />
-              </ProtectedRoute>
-            </TabsContent>
-
-            {!IS_PRODUCTION && (
-              <TabsContent value="dev" className="mt-0 outline-none">
-                <ProtectedRoute permission="useDevTools" deniedMessage="Apenas administradores podem acessar ferramentas de desenvolvimento.">
-                  <DevTools />
-                </ProtectedRoute>
-              </TabsContent>
-            )}
-          </Suspense>
+          <Suspense fallback={<ModuleFallback />}>{renderInternalOnlyRoute()}</Suspense>
         </AppErrorBoundary>
       </div>
     </main>

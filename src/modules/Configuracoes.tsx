@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BadgeCheck, Clock, KeyRound, Loader2, LockKeyhole, LogOut, ShieldCheck, Smartphone, UserCog } from 'lucide-react';
+import { BadgeCheck, Clock, KeyRound, Loader2, LogOut, ShieldCheck, Smartphone, UserCog } from 'lucide-react';
 import { getSessionSecurityConfig, useAppStore, type AppUser } from '@/store/useAppStore';
 import { getRoleLabel, hasPermission, type Permission, type UserRole } from '@/lib/permissions';
 import { Button } from '@/components/ui/button';
@@ -69,7 +69,7 @@ const INITIAL_MFA_PANEL_STATE: MfaPanelState = {
 };
 
 export function Configuracoes() {
-  const { currentUser, setCurrentUser, logAudit, lockSession, logout, refreshCurrentUser } = useAppStore();
+  const { currentUser, setCurrentUser, logAudit, logout, refreshCurrentUser } = useAppStore();
   const { idleTimeoutMs, maxSessionMs, loginMaxAttempts, lockoutMinutes } = getSessionSecurityConfig();
   const idleMinutes = Math.round(idleTimeoutMs / 60000);
   const maxHours = Math.round(maxSessionMs / 3600000);
@@ -495,27 +495,6 @@ export function Configuracoes() {
             <Button type="button" onClick={() => void logout()}>
               <LogOut className="mr-2 h-4 w-4" />
               Sair definitivo para relogar com MFA
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {currentUser ? (
-        <div className="cipf-panel p-6">
-          <div className="mb-4">
-            <h3 className="text-lg font-black text-[#17324d]">Sessao</h3>
-            <p className="text-sm text-[#617184]">
-              Bloquear preserva sessao Supabase e evita novo MFA enquanto `aal2` continuar valido. Prefira bloquear tela no dia a dia e use sair definitivo só quando precisar encerrar a sessão.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => void lockSession()}>
-              <LockKeyhole className="mr-2 h-4 w-4" />
-              Bloquear tela
-            </Button>
-            <Button type="button" variant="outline" onClick={() => void logout()}>
-              <LogOut className="mr-2 h-4 w-4" />
-              Sair definitivo
             </Button>
           </div>
         </div>

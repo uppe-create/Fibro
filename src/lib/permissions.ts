@@ -109,8 +109,12 @@ export function hasPermission(user: UserLike, permission: Permission): boolean {
   return ROLE_PERMISSIONS[normalizeRole(user.role)].includes(permission);
 }
 
+export function canAccessPublicTab(tab: string): boolean {
+  return ['inicio', 'validar', 'valida', 'privacidade', 'termos', 'contato', 'acessibilidade', 'suporte', 'configuracoes'].includes(tab);
+}
+
 export function canAccessTab(user: UserLike, tab: string): boolean {
-  if (['inicio', 'validar', 'valida', 'privacidade', 'termos', 'contato', 'acessibilidade', 'suporte'].includes(tab)) return true;
+  if (canAccessPublicTab(tab) && tab !== 'configuracoes') return true;
   if (tab === 'carteirinha') return hasPermission(user, 'printCarteirinha');
   if (tab === 'cadastro') return hasPermission(user, 'createRegistration');
   if (tab === 'dashboard') return hasPermission(user, 'viewDashboard');

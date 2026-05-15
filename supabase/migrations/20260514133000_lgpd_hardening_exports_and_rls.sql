@@ -25,7 +25,7 @@ begin
     raise exception 'FORBIDDEN';
   end if;
 
-  if v_kind not in ('dashboard_csv', 'dashboard_pdf', 'monthly_pdf') then
+  if v_kind not in ('dashboard_csv', 'dashboard_pdf', 'monthly_pdf', 'card_vendor_pdf') then
     raise exception 'FORBIDDEN';
   end if;
 
@@ -33,6 +33,7 @@ begin
     p_action => case
       when v_kind = 'dashboard_pdf' then 'Exportacao PDF autorizada'
       when v_kind = 'monthly_pdf' then 'Relatorio mensal autorizado'
+      when v_kind = 'card_vendor_pdf' then 'PDF tecnico da grafica autorizado'
       else 'Exportacao CSV autorizada'
     end,
     p_registration_id => null,
@@ -40,6 +41,7 @@ begin
     p_event_code => case
       when v_kind = 'dashboard_pdf' then 'export.dashboard_pdf'
       when v_kind = 'monthly_pdf' then 'export.monthly_pdf'
+      when v_kind = 'card_vendor_pdf' then 'export.card_vendor_pdf'
       else 'export.dashboard_csv'
     end,
     p_category => 'export',
@@ -49,11 +51,13 @@ begin
     p_summary => case
       when v_kind = 'dashboard_pdf' then 'Exportacao PDF autorizada'
       when v_kind = 'monthly_pdf' then 'Relatorio mensal autorizado'
+      when v_kind = 'card_vendor_pdf' then 'PDF tecnico da grafica autorizado'
       else 'Exportacao CSV autorizada'
     end,
     p_details => case
       when v_kind = 'dashboard_pdf' then 'Dashboard PDF solicitado'
       when v_kind = 'monthly_pdf' then 'Relatorio mensal solicitado'
+      when v_kind = 'card_vendor_pdf' then 'PDF tecnico de confeccao solicitado'
       else 'Dashboard CSV solicitado'
     end,
     p_metadata_json => jsonb_build_object('exportKind', v_kind, 'filters', coalesce(p_filters_json, '{}'::jsonb))

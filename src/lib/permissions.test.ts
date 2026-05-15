@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canAccessTab, getDefaultTabForRole, getRoleLabel, hasPermission, normalizeRole } from '@/lib/permissions';
+import { canAccessPublicTab, canAccessTab, getDefaultTabForRole, getRoleLabel, hasPermission, normalizeRole } from '@/lib/permissions';
 
 describe('permissions', () => {
   it('normalizes supported role aliases', () => {
@@ -17,7 +17,9 @@ describe('permissions', () => {
 
   it('allows public tabs without auth and routes roles to safe defaults', () => {
     expect(canAccessTab(null, 'validar')).toBe(true);
-    expect(canAccessTab({ role: 'attendant' }, 'operacao')).toBe(false);
+    expect(canAccessPublicTab('configuracoes')).toBe(true);
+    expect(canAccessPublicTab('dashboard')).toBe(false);
+    expect(canAccessTab({ role: 'attendant' }, 'operacao')).toBe(true);
     expect(getDefaultTabForRole('admin')).toBe('dashboard');
     expect(getDefaultTabForRole('attendant')).toBe('pessoas');
     expect(getDefaultTabForRole('viewer')).toBe('configuracoes');

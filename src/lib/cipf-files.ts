@@ -1,15 +1,46 @@
 import { supabase } from '@/lib/supabase';
 import { createCipfSignedUrl } from '@/lib/storage-files';
 
+type LoadCipfFileOptions = {
+  preferDataUri?: boolean;
+};
+
+function bytesToBase64(bytes: Uint8Array): string {
+  if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
+
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+  return btoa(binary);
+}
+
+async function fetchUrlAsDataUri(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('FETCH_FAILED');
+  const arrayBuffer = await response.arrayBuffer();
+  const mime = response.headers.get('content-type') || 'application/octet-stream';
+  return `data:${mime};base64,${bytesToBase64(new Uint8Array(arrayBuffer))}`;
+}
+
 /**
  * Rehydrates file payloads stored as chunked Base64 in Supabase.
  * Falls back to the legacy inline `data` field when available.
  */
-export async function loadCipfFileDataUri(fileId?: string, fallback = ''): Promise<string> {
+export async function loadCipfFileDataUri(fileId?: string, fallback = '', options: LoadCipfFileOptions = {}): Promise<string> {
   if (!fileId) return fallback;
 
   const signedUrl = await createCipfSignedUrl(fileId).catch(() => '');
-  if (signedUrl) return signedUrl;
+  if (signedUrl) {
+    if (options.preferDataUri) {
+      try {
+        return await fetchUrlAsDataUri(signedUrl);
+      } catch {
+        return signedUrl;
+      }
+    }
+    return signedUrl;
+  }
 
   try {
     const { data: fileData, error: fileError } = await supabase

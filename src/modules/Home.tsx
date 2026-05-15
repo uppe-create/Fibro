@@ -13,16 +13,19 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchHomeMetrics, formatMetricValue, HOME_METRICS_FALLBACK } from '@/lib/public-home-metrics';
+import { getRuntimeCompat } from '@/lib/runtime-compat';
 import { useAppStore } from '@/store/useAppStore';
 import heroImg from '@/assets/landing-hero.jpg';
 
 const PUBLIC_HOME_SECTION_STORAGE_KEY = 'cipf_public_home_section';
 
 function Reveal({ children, delay = 0 }: { children: ReactNode; delay?: number; key?: string }) {
+  const compat = getRuntimeCompat();
   const ref = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
+  const [visible, setVisible] = useState(compat.preferReducedEffects);
 
   useEffect(() => {
+    if (compat.preferReducedEffects) return;
     const element = ref.current;
     if (!element) return;
     const observer = new IntersectionObserver(
@@ -36,13 +39,17 @@ function Reveal({ children, delay = 0 }: { children: ReactNode; delay?: number; 
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [compat.preferReducedEffects]);
+
+  if (compat.preferReducedEffects) {
+    return <div className="reveal-safe">{children}</div>;
+  }
 
   return (
     <div
       ref={ref}
       style={{ transitionDelay: `${delay}ms` }}
-      className={`transition-all duration-700 ease-out ${visible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}`}
+      className={`reveal-safe transition-all duration-700 ease-out ${visible ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'}`}
     >
       {children}
     </div>
@@ -52,13 +59,15 @@ function Reveal({ children, delay = 0 }: { children: ReactNode; delay?: number; 
 const scrollTo = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
 export function Home() {
+  const compat = getRuntimeCompat();
   const { setActiveTab } = useAppStore();
-  const [mounted, setMounted] = useState(false);
+  const [mounted, setMounted] = useState(compat.preferReducedEffects);
   const [metrics, setMetrics] = useState(HOME_METRICS_FALLBACK);
 
   useEffect(() => {
+    if (compat.preferReducedEffects) return;
     setMounted(true);
-  }, []);
+  }, [compat.preferReducedEffects]);
 
   useEffect(() => {
     let active = true;
@@ -171,12 +180,9 @@ export function Home() {
     <div className="lovable-home relative bg-[hsl(30_25%_98%)] text-[hsl(270_25%_14%)]">
       <section className="relative min-h-screen overflow-hidden">
         <div className="absolute inset-0 -z-10">
-          <img src={heroImg} alt="" className="h-full w-full scale-110 object-cover animate-[landing-float_20s_ease-in-out_infinite]" />
+          <img src={heroImg} alt="" className="h-full w-full scale-110 object-cover" />
           <div className="absolute inset-0 bg-gradient-to-b from-[hsl(30_25%_98%/0.40)] via-[hsl(30_25%_98%/0.70)] to-[hsl(30_25%_98%)]" />
         </div>
-
-        <div className="absolute top-1/4 -left-32 h-96 w-96 animate-[landing-blob_18s_ease-in-out_infinite] rounded-full bg-[hsl(271_52%_32%/0.20)] blur-3xl" />
-        <div className="absolute bottom-0 -right-32 h-[28rem] w-[28rem] animate-[landing-blob_18s_ease-in-out_infinite] rounded-full bg-[hsl(271_52%_32%/0.15)] blur-3xl [animation-delay:6s]" />
 
         <header className="relative z-10">
           <div className="mx-auto flex min-h-16 max-w-[1240px] items-center justify-between gap-3 px-4 py-4 md:min-h-20 md:px-8">
@@ -209,7 +215,7 @@ export function Home() {
                 mounted ? 'translate-y-0 opacity-100' : 'translate-y-4 opacity-0'
               }`}
             >
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[hsl(271_52%_32%)]" />
+              <span className={`h-1.5 w-1.5 rounded-full bg-[hsl(271_52%_32%)] ${compat.preferReducedEffects ? '' : 'animate-pulse'}`} />
               Programa Municipal de Iperó para Apoio à Pessoa com Fibromialgia
             </div>
 
@@ -255,7 +261,7 @@ export function Home() {
           </div>
         </main>
 
-        <button type="button" onClick={() => scrollTo('sobre')} className="absolute bottom-6 left-1/2 z-10 hidden -translate-x-1/2 animate-bounce flex-col items-center gap-1 text-[hsl(270_8%_42%)] sm:flex">
+        <button type="button" onClick={() => scrollTo('sobre')} className={`absolute bottom-6 left-1/2 z-10 hidden -translate-x-1/2 flex-col items-center gap-1 text-[hsl(270_8%_42%)] sm:flex ${compat.preferReducedEffects ? '' : 'animate-bounce'}`}>
           <span className="text-[10px] uppercase tracking-[0.2em]">Role para descobrir</span>
           <ChevronDown className="h-4 w-4" />
         </button>
@@ -351,8 +357,6 @@ export function Home() {
       </section>
 
       <section className="relative overflow-hidden bg-[hsl(271_52%_32%)] py-28 text-[hsl(30_25%_98%)]">
-        <div className="absolute -top-32 -right-32 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute -bottom-32 -left-32 h-96 w-96 rounded-full bg-white/5 blur-3xl" />
         <div className="relative mx-auto max-w-[1240px] px-4 md:px-8">
           <Reveal>
             <div className="mx-auto max-w-3xl text-center">
@@ -393,8 +397,6 @@ export function Home() {
         <div className="mx-auto max-w-[1240px] px-4 md:px-8">
           <Reveal>
             <div className="relative overflow-hidden rounded-3xl border border-[hsl(270_15%_90%)] bg-white p-12 text-center shadow-[0_1px_2px_hsl(270_25%_14%/0.04)] md:p-20">
-              <div className="absolute -top-20 -left-20 h-72 w-72 rounded-full bg-[hsl(271_52%_32%/0.10)] blur-3xl" />
-              <div className="absolute -bottom-20 -right-20 h-72 w-72 rounded-full bg-[hsl(271_52%_32%/0.10)] blur-3xl" />
               <div className="relative">
                 <h2 className="mx-auto max-w-3xl text-4xl font-semibold leading-tight md:text-6xl">
                   Sua condição é real. <span className="text-[hsl(271_52%_32%)]">Seu direito também.</span>

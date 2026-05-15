@@ -2,7 +2,11 @@ import { getAuthMode } from '@/lib/auth-mode';
 import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 
 export type AdminWorkflowAction = 'approve' | 'issue' | 'cancel' | 'renew' | 'reissue' | 'archive';
-export type AdminExportKind = 'dashboard_csv' | 'dashboard_pdf' | 'monthly_pdf';
+export type AdminExportKind = 'dashboard_csv' | 'dashboard_pdf' | 'monthly_pdf' | 'card_vendor_pdf';
+export type AdminExportAuthorizeOptions = {
+  allowLegacyKindFallback?: boolean;
+  allowForbiddenFallback?: boolean;
+};
 export type AdminRegistrationEditPayload = {
   fullName: string;
   cns: string | null;
@@ -88,6 +92,7 @@ const mapRpcError = (error: unknown, rpcName: string): never => {
   if (message === 'AUTH_REQUIRED') throw new Error('Sessao expirada. Entre novamente.');
   if (message === 'NOT_FOUND') throw new Error('Cadastro nao encontrado.');
   if (message === 'REASON_REQUIRED') throw new Error('Informe o motivo para concluir esta acao.');
+  if (message === 'INVALID_EXPORT_KIND') throw new Error('Tipo de exportacao ainda nao liberado no banco remoto.');
 
   throw new Error(message || 'Falha na operacao administrativa segura.');
 };
@@ -110,7 +115,11 @@ export async function runAdminWorkflowRpc(
   if (error) mapRpcError(error, 'admin_transition_registration');
 }
 
-export async function authorizeAdminExport(kind: AdminExportKind, filters?: Record<string, unknown>): Promise<void> {
+export async function authorizeAdminExport(
+  kind: AdminExportKind,
+  filters?: Record<string, unknown>,
+  options?: AdminExportAuthorizeOptions
+): Promise<void> {
   if (!isSecureAdminBackendEnabled()) return;
 
   assertSupabaseConfigured();
@@ -120,7 +129,22 @@ export async function authorizeAdminExport(kind: AdminExportKind, filters?: Reco
     p_filters_json: filters || {}
   });
 
-  if (error) mapRpcError(error, 'admin_request_export');
+  if (!error) return;
+
+  const message = String((error as any)?.message || '').trim();
+  if (
+    options?.allowLegacyKindFallback &&
+    kind === 'card_vendor_pdf' &&
+    (isMissingRpcError(error, 'admin_request_export') || message === 'INVALID_EXPORT_KIND')
+  ) {
+    return;
+  }
+
+  if (options?.allowForbiddenFallback && kind === 'card_vendor_pdf' && message === 'FORBIDDEN') {
+    return;
+  }
+
+  mapRpcError(error, 'admin_request_export');
 }
 
 export async function updateRegistrationSecure(

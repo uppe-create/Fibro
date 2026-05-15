@@ -3,6 +3,7 @@ import type { User as SupabaseUser } from '@supabase/supabase-js';
 import { assertSupabaseConfigured, supabase } from '@/lib/supabase';
 import { logAuditEvent } from '@/lib/audit';
 import { archiveDatabaseSecure, isSecureAdminBackendEnabled } from '@/lib/admin-rpc';
+import { resolveInitialActiveTab } from '@/lib/app-bootstrap';
 import { buildAuditEvent, type AuditEventInput } from '@/lib/audit-events';
 import { hasPermission, normalizeRole, type UserRole } from '@/lib/permissions';
 import type { RegistrationStatus } from '@/lib/registration-status';
@@ -11,7 +12,7 @@ import { getAuthMode, getProductionAuthError } from '@/lib/auth-mode';
 const LOCAL_AUTH_STORAGE_KEY = 'cipf_local_auth';
 const LOGIN_ATTEMPTS_STORAGE_KEY = 'cipf_login_attempts';
 const LOGIN_LOCK_UNTIL_STORAGE_KEY = 'cipf_login_lock_until';
-const SESSION_LOCKED_STORAGE_KEY = 'cipf_session_locked';
+const LEGACY_SESSION_LOCKED_STORAGE_KEY = 'cipf_session_locked';
 
 export const SESSION_ACTIVITY_STORAGE_KEY = 'cipf_last_activity';
 export const SESSION_LOGIN_AT_STORAGE_KEY = 'cipf_login_at';
@@ -97,7 +98,6 @@ export type CIPFRegistration = {
 type AppState = {
   isAuthReady: boolean;
   currentUser: AppUser | null;
-  isSessionLocked: boolean;
   mfaChallenge: MfaChallengeState;
   registrations: CIPFRegistration[];
   lastBackupDate: number | null;
@@ -110,8 +110,6 @@ type AppState = {
   cancelMfaChallenge: () => Promise<void>;
   clearMfaChallengeError: () => void;
   refreshCurrentUser: () => Promise<void>;
-  lockSession: () => Promise<void>;
-  unlockSession: () => Promise<void>;
   logout: () => Promise<void>;
   logAudit: (action: string, reason?: string, registrationId?: string) => Promise<void>;
   fetchRegistrations: () => Promise<void>;
@@ -123,6 +121,15 @@ const asInt = (value: unknown, fallback: number, min: number, max: number): numb
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(parsed)));
+};
+
+const readStorageNumber = (storage: Pick<Storage, 'getItem'>, key: string, fallback = 0) => {
+  try {
+    const parsed = Number(storage.getItem(key) || fallback);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
 };
 
 export function getSessionSecurityConfig() {
@@ -152,11 +159,15 @@ const getLocalUserSession = (): AppUser | null => {
   }
 };
 
+const clearLegacySessionLockFlag = () => {
+  localStorage.removeItem(LEGACY_SESSION_LOCKED_STORAGE_KEY);
+};
+
 // Login lockout is client-side UX protection for the local MVP login. It is not
 // a replacement for server-side authentication/rate limiting in production.
-const readFailedAttempts = (): number => Number(localStorage.getItem(LOGIN_ATTEMPTS_STORAGE_KEY) || '0');
 const writeFailedAttempts = (value: number) => localStorage.setItem(LOGIN_ATTEMPTS_STORAGE_KEY, String(Math.max(0, value)));
-const readLockUntil = (): number => Number(localStorage.getItem(LOGIN_LOCK_UNTIL_STORAGE_KEY) || '0');
+const readFailedAttempts = (): number => readStorageNumber(localStorage, LOGIN_ATTEMPTS_STORAGE_KEY, 0);
+const readLockUntil = (): number => readStorageNumber(localStorage, LOGIN_LOCK_UNTIL_STORAGE_KEY, 0);
 
 const clearLoginGuards = () => {
   localStorage.removeItem(LOGIN_ATTEMPTS_STORAGE_KEY);
@@ -271,39 +282,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     getAuthMode((import.meta as any).env || {}) === 'supabase'
       ? null
       : getLocalUserSession(),
-  isSessionLocked: localStorage.getItem(SESSION_LOCKED_STORAGE_KEY) === '1',
   mfaChallenge: EMPTY_MFA_CHALLENGE,
   registrations: [],
-  lastBackupDate: parseInt(localStorage.getItem('lastBackupDate') || '0', 10) || null,
-  activeTab: (() => {
-    const path = window.location.pathname.replace('/', '');
-    return [
-      'inicio',
-      'acessibilidade',
-      'contato',
-      'privacidade',
-      'suporte',
-      'termos',
-      'validar',
-      'valida',
-      'cadastros',
-      'carteirinha',
-      'cadastro',
-      'dashboard',
-      'pessoas',
-      'operacao',
-      'documentos',
-      'retiradas',
-      'relatorios',
-      'auditoria',
-      'governanca',
-      'configuracoes',
-      'dev'
-    ].includes(path) ? ({ valida: 'validar', cadastros: 'pessoas' } as Record<string, string>)[path] || path : 'inicio';
-  })(),
+  lastBackupDate: readStorageNumber(localStorage, 'lastBackupDate', 0) || null,
+  activeTab: resolveInitialActiveTab(window.location.pathname),
   setActiveTab: (tab: string) => {
-    set({ activeTab: tab });
-    const route = tab === 'pessoas' ? 'cadastros' : tab;
+    const nextTab = resolveInitialActiveTab(`/${tab}`);
+    set({ activeTab: nextTab });
+    const route = nextTab === 'pessoas' ? 'cadastros' : nextTab;
     window.history.pushState({}, '', `/${route === 'inicio' ? '' : route}`);
   },
   setCurrentUser: (user) => {
@@ -311,23 +297,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(user));
       localStorage.setItem(SESSION_LOGIN_AT_STORAGE_KEY, String(Date.now()));
       localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
-      localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
+      clearLegacySessionLockFlag();
     } else {
       sessionStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
     }
-    set({ currentUser: user, isSessionLocked: false });
+    set({ currentUser: user });
   },
   initializeAuth: async () => {
     const env = (import.meta as any).env || {};
     const productionAuthError = getProductionAuthError(env, Boolean(env.PROD));
     if (productionAuthError) {
       sessionStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
+      clearLegacySessionLockFlag();
       set({ currentUser: null, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
       return;
     }
 
     if (getAuthMode(env) !== 'supabase') {
-      set({ currentUser: getLocalUserSession(), isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
+      const localUser = getLocalUserSession();
+      if (!localUser) clearLegacySessionLockFlag();
+      set({
+        currentUser: localUser,
+        isAuthReady: true,
+        mfaChallenge: EMPTY_MFA_CHALLENGE
+      });
       return;
     }
 
@@ -337,12 +330,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       const { data, error } = await supabase.auth.getSession();
       if (error || !data.session?.user) {
         sessionStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
+        clearLegacySessionLockFlag();
         set({ currentUser: null, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
         return;
       }
 
       if (await isMfaChallengeRequired()) {
         sessionStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
+        clearLegacySessionLockFlag();
         set({
           currentUser: null,
           isAuthReady: true,
@@ -357,10 +352,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const authUser = await buildUserFromSupabaseAuth(data.session.user);
       sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(authUser));
-      set({ currentUser: authUser, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
+      set({
+        currentUser: authUser,
+        isAuthReady: true,
+        mfaChallenge: EMPTY_MFA_CHALLENGE
+      });
     } catch (error) {
       console.error('Falha ao restaurar sessao Supabase Auth.', error);
       sessionStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
+      clearLegacySessionLockFlag();
       set({ currentUser: null, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
     }
   },
@@ -402,8 +402,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(authUser));
       localStorage.setItem(SESSION_LOGIN_AT_STORAGE_KEY, String(Date.now()));
       localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
-      localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
-      set({ currentUser: authUser, isSessionLocked: false, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
+      clearLegacySessionLockFlag();
+      set({ currentUser: authUser, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
 
       await logAuditEvent(buildAuditEvent('auth.login.supabase', { userId: authUser.id, userName: authUser.name, details: `Perfil ${authUser.role}` }));
       return;
@@ -456,8 +456,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(localUser));
     localStorage.setItem(SESSION_LOGIN_AT_STORAGE_KEY, String(Date.now()));
     localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
-    localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
-    set({ currentUser: localUser, isSessionLocked: false, isAuthReady: true });
+    clearLegacySessionLockFlag();
+    set({ currentUser: localUser, isAuthReady: true });
 
     await logAuditEvent(buildAuditEvent('auth.login.local', { userId: localUser.id, userName: localUser.name, details: 'Acesso autorizado' }));
   },
@@ -499,8 +499,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(authUser));
     localStorage.setItem(SESSION_LOGIN_AT_STORAGE_KEY, String(Date.now()));
     localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
-    localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
-    set({ currentUser: authUser, isSessionLocked: false, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
+    clearLegacySessionLockFlag();
+    set({ currentUser: authUser, isAuthReady: true, mfaChallenge: EMPTY_MFA_CHALLENGE });
   },
   cancelMfaChallenge: async () => {
     try {
@@ -512,8 +512,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
     localStorage.removeItem(SESSION_LOGIN_AT_STORAGE_KEY);
     localStorage.removeItem(SESSION_ACTIVITY_STORAGE_KEY);
-    localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
-    set({ currentUser: null, isSessionLocked: false, mfaChallenge: EMPTY_MFA_CHALLENGE });
+    clearLegacySessionLockFlag();
+    set({ currentUser: null, mfaChallenge: EMPTY_MFA_CHALLENGE });
   },
   clearMfaChallengeError: () => {
     set((state) => ({
@@ -550,25 +550,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(authUser));
     set({ currentUser: authUser, mfaChallenge: EMPTY_MFA_CHALLENGE });
   },
-  lockSession: async () => {
-    const user = get().currentUser;
-    if (!user) return;
-    localStorage.setItem(SESSION_LOCKED_STORAGE_KEY, '1');
-    set({ isSessionLocked: true, registrations: [] });
-    try {
-      await logAuditEvent(buildAuditEvent('auth.session_locked', { userId: user.id, userName: user.name, details: 'Bloqueio local de tela' }));
-    } catch {
-      // Local lock must work even when audit RPC is temporarily unavailable.
-    }
-  },
-  unlockSession: async () => {
-    await get().refreshCurrentUser();
-    if (get().mfaChallenge.required) return;
-    if (!get().currentUser) throw new Error('Sessao expirada. Entre novamente.');
-    localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
-    localStorage.setItem(SESSION_ACTIVITY_STORAGE_KEY, String(Date.now()));
-    set({ isSessionLocked: false });
-  },
   logout: async () => {
     const env = (import.meta as any).env || {};
     const user = get().currentUser;
@@ -582,8 +563,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     sessionStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
     localStorage.removeItem(SESSION_LOGIN_AT_STORAGE_KEY);
     localStorage.removeItem(SESSION_ACTIVITY_STORAGE_KEY);
-    localStorage.removeItem(SESSION_LOCKED_STORAGE_KEY);
-    set({ currentUser: null, isSessionLocked: false, registrations: [], mfaChallenge: EMPTY_MFA_CHALLENGE });
+    clearLegacySessionLockFlag();
+    set({ currentUser: null, registrations: [], mfaChallenge: EMPTY_MFA_CHALLENGE });
 
     await logAuditEvent(buildAuditEvent('auth.logout', { userId: user?.id || null, userName: user?.name || 'Sistema', details: 'Encerramento de sessao' }));
   },

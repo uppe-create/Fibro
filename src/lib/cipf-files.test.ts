@@ -29,6 +29,7 @@ const query = {
 describe('CIPF file loading', () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.stubGlobal('fetch', vi.fn());
     Object.values(cipfFileMocks).forEach((mock) => mock.mockReset());
     cipfFileMocks.from.mockReturnValue(query);
     cipfFileMocks.select.mockReturnValue(query);
@@ -42,6 +43,18 @@ describe('CIPF file loading', () => {
 
     await expect(loadCipfFileDataUri('storage-id')).resolves.toBe('https://signed.test/private.pdf');
     expect(cipfFileMocks.from).not.toHaveBeenCalledWith('cipf_files');
+  });
+
+  it('converte signed URL para data uri quando preferDataUri', async () => {
+    cipfFileMocks.createCipfSignedUrl.mockResolvedValueOnce('https://signed.test/private.jpg');
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      headers: { get: vi.fn(() => 'image/jpeg') },
+      arrayBuffer: vi.fn(async () => Uint8Array.from([255, 216, 255]).buffer)
+    } as any);
+    const { loadCipfFileDataUri } = await import('@/lib/cipf-files');
+
+    await expect(loadCipfFileDataUri('photo-id', '', { preferDataUri: true })).resolves.toMatch(/^data:image\/jpeg;base64,/);
   });
 
   it('keeps legacy Base64 chunk fallback', async () => {
